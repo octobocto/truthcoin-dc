@@ -234,3 +234,36 @@ impl Config {
             .unwrap()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, Network};
+    use clap::Parser;
+
+    #[test]
+    fn alphanet_uses_the_remote_validator() {
+        let cli = Cli::try_parse_from([
+            "truthcoin",
+            "--datadir=/tmp/truthcoin-cli-test",
+            "--network=alphanet",
+            "--mainchain-grpc-host=127.0.0.1",
+            "--mainchain-grpc-port=54321",
+        ])
+        .unwrap();
+        assert_eq!(cli.network, Network::Alphanet);
+        assert_eq!(
+            cli.mainchain_grpc_url().as_str(),
+            "http://127.0.0.1:54321/"
+        );
+    }
+
+    #[test]
+    fn the_default_network_stays_signet() {
+        let cli = Cli::try_parse_from([
+            "truthcoin",
+            "--datadir=/tmp/truthcoin-cli-test",
+        ])
+        .unwrap();
+        assert_eq!(cli.network, Network::Signet);
+    }
+}

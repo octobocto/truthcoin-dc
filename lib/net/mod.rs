@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, hash_map},
-    net::SocketAddr,
+    net::{SocketAddr, ToSocketAddrs},
     sync::Arc,
 };
 
@@ -34,6 +34,9 @@ pub use peer::{
     PeerStateId, Request as PeerRequest, ResponseMessage as PeerResponse,
     message as peer_message,
 };
+
+#[cfg(test)]
+mod tests;
 
 /// Dummy certificate verifier that treats any certificate as valid.
 /// NOTE, such verification is vulnerable to MITM attacks, but convenient for testing.
@@ -163,9 +166,28 @@ const FORKNET_SEED_NODE_ADDRS: &[SocketAddr] = {
 const fn seed_node_addrs(network: Network) -> &'static [SocketAddr] {
     match network {
         Network::Signet => SIGNET_SEED_NODE_ADDRS,
-        Network::Regtest => &[],
+        Network::Regtest | Network::Alphanet => &[],
         Network::Forknet => FORKNET_SEED_NODE_ADDRS,
     }
+}
+
+const ALPHANET_SEED: (&str, u16) =
+    ("seed.alpha.ecash.eu.com", 4000 + THIS_SIDECHAIN as u16);
+
+fn resolve_seed_addrs(
+    seed: impl ToSocketAddrs,
+) -> std::io::Result<Vec<SocketAddr>> {
+    let addrs: Vec<_> = seed
+        .to_socket_addrs()?
+        .filter(|addr| !addr.ip().is_unspecified())
+        .collect();
+    if addrs.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AddrNotAvailable,
+            "the seed has no usable address",
+        ));
+    }
+    Ok(addrs)
 }
 
 // Keep track of peer state
@@ -331,6 +353,11 @@ impl Net {
                     known_peers
                 }
             };
+        if network == Network::Alphanet {
+            for addr in resolve_seed_addrs(ALPHANET_SEED)? {
+                known_peers.put(&mut rwtxn, &addr, &())?;
+            }
+        }
         let version = DatabaseUnique::create(env, &mut rwtxn, "net_version")?;
         if version.try_get(&rwtxn, &())?.is_none() {
             version.put(&mut rwtxn, &(), &*VERSION)?;
