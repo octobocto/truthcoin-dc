@@ -36,7 +36,7 @@ pub use peer::{
 };
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// Dummy certificate verifier that treats any certificate as valid.
 /// NOTE, such verification is vulnerable to MITM attacks, but convenient for testing.
@@ -221,19 +221,31 @@ impl Net {
         &self,
         addr: SocketAddr,
         peer_connection_handle: PeerConnectionHandle,
+        info_rx: mpsc::UnboundedReceiver<PeerConnectionInfo>,
     ) -> Result<(), error::AlreadyConnected> {
         tracing::trace!(%addr, "adding to active peers");
         let mut active_peers_write = self.active_peers.write();
         match active_peers_write.entry(addr) {
             hash_map::Entry::Occupied(_) => {
                 tracing::error!(%addr, "already connected");
-                Err(error::AlreadyConnected(addr))
+                return Err(error::AlreadyConnected(addr));
             }
             hash_map::Entry::Vacant(active_peer_entry) => {
                 active_peer_entry.insert(peer_connection_handle);
-                Ok(())
             }
         }
+        drop(active_peers_write);
+        tokio::spawn({
+            let info_rx = StreamNotifyClose::new(info_rx)
+                .map(move |info| Ok((addr, info)));
+            let peer_info_tx = self.peer_info_tx.clone();
+            async move {
+                if let Err(_send_err) = info_rx.forward(peer_info_tx).await {
+                    tracing::error!(%addr, "Failed to send peer connection info");
+                }
+            }
+        });
+        Ok(())
     }
 
     pub fn remove_active_peer(&self, addr: SocketAddr) {
@@ -303,19 +315,7 @@ impl Net {
         };
         let (connection_handle, info_rx) =
             peer::connect(connecting, connection_ctxt);
-        tracing::trace!("spawning info rx");
-        tokio::spawn({
-            let info_rx = StreamNotifyClose::new(info_rx)
-                .map(move |info| Ok((addr, info)));
-            let peer_info_tx = self.peer_info_tx.clone();
-            async move {
-                if let Err(_send_err) = info_rx.forward(peer_info_tx).await {
-                    tracing::error!("Failed to send peer connection info");
-                }
-            }
-        });
-        tracing::trace!("adding to active peers");
-        self.add_active_peer(addr, connection_handle)?;
+        self.add_active_peer(addr, connection_handle, info_rx)?;
         Ok(())
     }
 
@@ -471,18 +471,7 @@ impl Net {
         };
         let (connection_handle, info_rx) =
             peer::handle(connection_ctxt, connection);
-        tokio::spawn({
-            let info_rx = StreamNotifyClose::new(info_rx)
-                .map(move |info| Ok((addr, info)));
-            let peer_info_tx = self.peer_info_tx.clone();
-            async move {
-                if let Err(_send_err) = info_rx.forward(peer_info_tx).await {
-                    tracing::error!(%addr, "Failed to send peer connection info");
-                }
-            }
-        });
-        // TODO: is this the right state?
-        self.add_active_peer(addr, connection_handle)?;
+        self.add_active_peer(addr, connection_handle, info_rx)?;
         Ok(Some(addr))
     }
 

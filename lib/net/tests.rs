@@ -2,6 +2,15 @@ use std::{net::SocketAddr, time::Duration};
 
 use super::{ALPHANET_SEED, Archive, DatabaseUnique, Net, Network, State};
 
+pub(crate) fn set_crypto_provider() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    INIT.call_once(|| {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .expect("install the test TLS provider");
+    });
+}
+
 #[test]
 fn alphanet_names_the_seed_port() {
     assert_eq!(ALPHANET_SEED, ("seed.alpha.ecash.eu.com", 4013));
@@ -26,9 +35,7 @@ fn seed_resolution_keeps_both_address_families() {
 
 #[test]
 fn ipv4_node_connects_with_both_seed_families() {
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .expect("install the test TLS provider");
+    set_crypto_provider();
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -79,4 +86,52 @@ fn ipv4_node_connects_with_both_seed_families() {
         net.server.close(0_u32.into(), b"test complete");
         remote.close(0_u32.into(), b"test complete");
     });
+}
+
+#[tokio::test]
+async fn rejected_duplicate_has_no_peer_close_event() -> anyhow::Result<()> {
+    use futures::StreamExt;
+
+    set_crypto_provider();
+    let dir = tempfile::tempdir()?;
+    let mut options = heed::EnvOpenOptions::new();
+    options
+        .map_size(16 * 1024 * 1024)
+        .max_dbs(State::NUM_DBS + Archive::NUM_DBS + Net::NUM_DBS);
+    let env = unsafe { sneed::Env::open(&options, dir.path()) }?;
+    let state = State::new(&env, None)?;
+    let archive = Archive::new(&env)?;
+    let (net, info_rx) = Net::new(
+        &env,
+        archive,
+        Network::Regtest,
+        state,
+        "127.0.0.1:0".parse()?,
+    )?;
+    let (remote, _) = super::make_server_endpoint("127.0.0.1:0".parse()?)?;
+    let addr = remote.local_addr()?;
+    net.connect_peer(env.clone(), addr)?;
+    let context = super::PeerConnectionCtxt {
+        env,
+        archive: net.archive.clone(),
+        network: net.network,
+        state: net.state.clone(),
+    };
+    let (duplicate, duplicate_info) =
+        super::peer::connect(net.server.connect(addr, "localhost")?, context);
+
+    let error = net
+        .add_active_peer(addr, duplicate, duplicate_info)
+        .unwrap_err();
+    assert_eq!(error.0, addr);
+    assert_eq!(net.get_active_peers().len(), 1);
+    drop(net);
+
+    let events = tokio::time::timeout(
+        Duration::from_secs(5),
+        info_rx.collect::<Vec<_>>(),
+    )
+    .await?;
+    assert_eq!(events.iter().filter(|(_, info)| info.is_none()).count(), 1);
+    Ok(())
 }
