@@ -59,16 +59,6 @@ jobs:
           chmod +x bitcoin-patched-bins/bitcoind
           chmod +x bitcoin-patched-bins/bitcoin-cli
           popd
-      - name: Download latest bip300301_enforcer
-        run: |
-          pushd ..
-          wget https://releases.drivechain.info/bip300301-enforcer-latest-x86_64-unknown-linux-gnu.zip
-          unzip bip300301-enforcer-latest-x86_64-unknown-linux-gnu.zip
-          rm bip300301-enforcer-latest-x86_64-unknown-linux-gnu.zip
-          mv bip300301-enforcer-latest-x86_64-unknown-linux-gnu/bip300301-enforcer-*-x86_64-unknown-linux-gnu bip300301-enforcer
-          rm -r bip300301-enforcer-latest-x86_64-unknown-linux-gnu
-          chmod +x bip300301-enforcer
-          popd
       - name: Download latest electrs
         run: |
           pushd ..
@@ -90,12 +80,22 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: x86_64-unknown-linux-gnu
+      - name: Build the matched enforcer
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+          ENFORCER_SOURCE: ${{ runner.temp }}/bip300301-enforcer
+        run: |
+          ENFORCER_REV=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["dependencies"]["bip300301_enforcer_integration_tests"]["rev"])')
+          git init "$ENFORCER_SOURCE"
+          git -C "$ENFORCER_SOURCE" fetch --depth 1 https://github.com/LayerTwo-Labs/bip300301_enforcer "$ENFORCER_REV"
+          git -C "$ENFORCER_SOURCE" checkout --detach FETCH_HEAD
+          cargo build --locked --manifest-path "$ENFORCER_SOURCE/Cargo.toml" --bin bip300301_enforcer
       - name: Build (debug)
         run: cargo build
       - name: Run integration tests
         id: runIntegrationTests
         run: |
-          export BIP300301_ENFORCER='../bip300301-enforcer'
+          export BIP300301_ENFORCER='target/debug/bip300301_enforcer'
           export BITCOIND='../bitcoin-patched-bins/bitcoind'
           export BITCOIN_CLI='../bitcoin-patched-bins/bitcoin-cli'
           export ELECTRS='../electrs'
@@ -111,7 +111,7 @@ jobs:
             name: x86_64-unknown-linux-gnu
             binary-suffix: ""
             rustflags: ""
-          - os: macos-latest-large
+          - os: macos-latest
             name: x86_64-apple-darwin
             binary-suffix: ""
             rustflags: ""
@@ -159,9 +159,11 @@ jobs:
             jq -er '.packages | map(select(.name == "truthcoin_dc_app") | .version) | .[0]')
           TRUTHCOIN_APP_FILENAME="truthcoin-${TRUTHCOIN_APP_VERSION}-${{ matrix.name }}${{ matrix.binary-suffix }}"
           TRUTHCOIN_CLI_FILENAME="truthcoin-cli-${TRUTHCOIN_APP_VERSION}-${{ matrix.name }}${{ matrix.binary-suffix }}"
+          TRUTHCOIN_ARCHIVE_FILENAME="truthcoin-${TRUTHCOIN_APP_VERSION}-${{ matrix.name }}.zip"
           echo "TRUTHCOIN_APP_VERSION=$TRUTHCOIN_APP_VERSION" >> "$GITHUB_ENV"
           echo "TRUTHCOIN_APP_FILENAME=$TRUTHCOIN_APP_FILENAME" >> "$GITHUB_ENV"
           echo "TRUTHCOIN_CLI_FILENAME=$TRUTHCOIN_CLI_FILENAME" >> "$GITHUB_ENV"
+          echo "TRUTHCOIN_ARCHIVE_FILENAME=$TRUTHCOIN_ARCHIVE_FILENAME" >> "$GITHUB_ENV"
 
       - name: 'Set filenames for release binaries'
         run: |
@@ -169,6 +171,15 @@ jobs:
           ln -fs "truthcoin_dc_app${{ matrix.binary-suffix }}" "${TRUTHCOIN_APP_FILENAME}"
           ln -fs "truthcoin_dc_app_cli${{ matrix.binary-suffix }}" "${TRUTHCOIN_CLI_FILENAME}"
           popd
+
+      - name: Package release binaries
+        run: |
+          cd "target/${{ matrix.name }}/release"
+          mkdir -p package
+          cp "truthcoin_dc_app${{ matrix.binary-suffix }}" "package/truthcoin${{ matrix.binary-suffix }}"
+          cp "truthcoin_dc_app_cli${{ matrix.binary-suffix }}" "package/truthcoin-cli${{ matrix.binary-suffix }}"
+          cd package
+          zip "../${TRUTHCOIN_ARCHIVE_FILENAME}" "truthcoin${{ matrix.binary-suffix }}" "truthcoin-cli${{ matrix.binary-suffix }}"
 
       - name: 'Upload Artifacts (truthcoin)'
         uses: actions/upload-artifact@v4
@@ -178,6 +189,7 @@ jobs:
           path: |
             target/${{ matrix.name }}/release/${{ env.TRUTHCOIN_APP_FILENAME }}
             target/${{ matrix.name }}/release/${{ env.TRUTHCOIN_CLI_FILENAME }}
+            target/${{ matrix.name }}/release/${{ env.TRUTHCOIN_ARCHIVE_FILENAME }}
 
       - name: Release
         uses: softprops/action-gh-release@v2.0.2
@@ -186,13 +198,14 @@ jobs:
           files: |
             target/${{ matrix.name }}/release/${{ env.TRUTHCOIN_APP_FILENAME }}
             target/${{ matrix.name }}/release/${{ env.TRUTHCOIN_CLI_FILENAME }}
+            target/${{ matrix.name }}/release/${{ env.TRUTHCOIN_ARCHIVE_FILENAME }}
           fail_on_unmatched_files: true
 
   upload-releases-to-releases-drivechain-info:
     name: Upload releases to releases.drivechain.info
     runs-on: ubuntu-latest
     needs: [build-release, integration-test]
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') && vars.ENABLE_RELEASE_MIRROR == 'true'
     steps:
       - name: Download release assets
         uses: robinraju/release-downloader@v1.9
