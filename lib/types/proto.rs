@@ -269,6 +269,7 @@ pub mod mainchain {
         THIS_SIDECHAIN,
     };
 
+    #[allow(clippy::double_must_use)]
     pub mod generated {
         tonic::include_proto!("cusf.mainchain.v1");
     }

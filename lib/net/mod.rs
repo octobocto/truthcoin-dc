@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, hash_map},
-    net::SocketAddr,
+    net::{SocketAddr, ToSocketAddrs},
     sync::Arc,
 };
 
@@ -34,6 +34,9 @@ pub use peer::{
     PeerStateId, Request as PeerRequest, ResponseMessage as PeerResponse,
     message as peer_message,
 };
+
+#[cfg(test)]
+pub(crate) mod tests;
 
 /// Dummy certificate verifier that treats any certificate as valid.
 /// NOTE, such verification is vulnerable to MITM attacks, but convenient for testing.
@@ -163,9 +166,28 @@ const FORKNET_SEED_NODE_ADDRS: &[SocketAddr] = {
 const fn seed_node_addrs(network: Network) -> &'static [SocketAddr] {
     match network {
         Network::Signet => SIGNET_SEED_NODE_ADDRS,
-        Network::Regtest => &[],
+        Network::Regtest | Network::Alphanet => &[],
         Network::Forknet => FORKNET_SEED_NODE_ADDRS,
     }
+}
+
+const ALPHANET_SEED: (&str, u16) =
+    ("seed.alpha.ecash.eu.com", 4000 + THIS_SIDECHAIN as u16);
+
+fn resolve_seed_addrs(
+    seed: impl ToSocketAddrs,
+) -> std::io::Result<Vec<SocketAddr>> {
+    let addrs: Vec<_> = seed
+        .to_socket_addrs()?
+        .filter(|addr| !addr.ip().is_unspecified())
+        .collect();
+    if addrs.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AddrNotAvailable,
+            "the seed has no usable address",
+        ));
+    }
+    Ok(addrs)
 }
 
 // Keep track of peer state
@@ -199,19 +221,31 @@ impl Net {
         &self,
         addr: SocketAddr,
         peer_connection_handle: PeerConnectionHandle,
+        info_rx: mpsc::UnboundedReceiver<PeerConnectionInfo>,
     ) -> Result<(), error::AlreadyConnected> {
         tracing::trace!(%addr, "adding to active peers");
         let mut active_peers_write = self.active_peers.write();
         match active_peers_write.entry(addr) {
             hash_map::Entry::Occupied(_) => {
                 tracing::error!(%addr, "already connected");
-                Err(error::AlreadyConnected(addr))
+                return Err(error::AlreadyConnected(addr));
             }
             hash_map::Entry::Vacant(active_peer_entry) => {
                 active_peer_entry.insert(peer_connection_handle);
-                Ok(())
             }
         }
+        drop(active_peers_write);
+        tokio::spawn({
+            let info_rx = StreamNotifyClose::new(info_rx)
+                .map(move |info| Ok((addr, info)));
+            let peer_info_tx = self.peer_info_tx.clone();
+            async move {
+                if let Err(_send_err) = info_rx.forward(peer_info_tx).await {
+                    tracing::error!(%addr, "Failed to send peer connection info");
+                }
+            }
+        });
+        Ok(())
     }
 
     pub fn remove_active_peer(&self, addr: SocketAddr) {
@@ -281,19 +315,7 @@ impl Net {
         };
         let (connection_handle, info_rx) =
             peer::connect(connecting, connection_ctxt);
-        tracing::trace!("spawning info rx");
-        tokio::spawn({
-            let info_rx = StreamNotifyClose::new(info_rx)
-                .map(move |info| Ok((addr, info)));
-            let peer_info_tx = self.peer_info_tx.clone();
-            async move {
-                if let Err(_send_err) = info_rx.forward(peer_info_tx).await {
-                    tracing::error!("Failed to send peer connection info");
-                }
-            }
-        });
-        tracing::trace!("adding to active peers");
-        self.add_active_peer(addr, connection_handle)?;
+        self.add_active_peer(addr, connection_handle, info_rx)?;
         Ok(())
     }
 
@@ -331,6 +353,11 @@ impl Net {
                     known_peers
                 }
             };
+        if network == Network::Alphanet {
+            for addr in resolve_seed_addrs(ALPHANET_SEED)? {
+                known_peers.put(&mut rwtxn, &addr, &())?;
+            }
+        }
         let version = DatabaseUnique::create(env, &mut rwtxn, "net_version")?;
         if version.try_get(&rwtxn, &())?.is_none() {
             version.put(&mut rwtxn, &(), &*VERSION)?;
@@ -444,18 +471,7 @@ impl Net {
         };
         let (connection_handle, info_rx) =
             peer::handle(connection_ctxt, connection);
-        tokio::spawn({
-            let info_rx = StreamNotifyClose::new(info_rx)
-                .map(move |info| Ok((addr, info)));
-            let peer_info_tx = self.peer_info_tx.clone();
-            async move {
-                if let Err(_send_err) = info_rx.forward(peer_info_tx).await {
-                    tracing::error!(%addr, "Failed to send peer connection info");
-                }
-            }
-        });
-        // TODO: is this the right state?
-        self.add_active_peer(addr, connection_handle)?;
+        self.add_active_peer(addr, connection_handle, info_rx)?;
         Ok(Some(addr))
     }
 
