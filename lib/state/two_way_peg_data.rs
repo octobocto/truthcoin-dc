@@ -990,11 +990,10 @@ pub fn disconnect(
                  {last_withdrawal_bundle_event_block_hash}"
             )));
         }
-        if block_height - 1 != last_withdrawal_bundle_event_block_height {
+        if block_height != last_withdrawal_bundle_event_block_height {
             return Err(Error::DatabaseError(format!(
                 "withdrawal bundle event block height mismatch: \
-                 {} != {last_withdrawal_bundle_event_block_height}",
-                block_height - 1,
+                 {block_height} != {last_withdrawal_bundle_event_block_height}"
             )));
         }
         if !state
@@ -1009,7 +1008,7 @@ pub fn disconnect(
         .map(|(height, _bundle)| height)
         .unwrap_or_default();
     if block_height - last_withdrawal_bundle_failure_height
-        > WITHDRAWAL_BUNDLE_FAILURE_GAP
+        >= WITHDRAWAL_BUNDLE_FAILURE_GAP
         && let Some(bundle_m6id) =
             state.pending_withdrawal_bundle.try_get(rwtxn, &())?
         && let (bundle, bundle_status) = state
@@ -1021,7 +1020,7 @@ pub fn disconnect(
                      unknown in withdrawal_bundles"
                 ))
             })?
-        && bundle_status.latest().height == block_height - 1
+        && bundle_status.latest().height == block_height
     {
         state.pending_withdrawal_bundle.delete(rwtxn, &())?;
         if let (Some(bundle_status), _latest_bundle_status) =
@@ -1051,11 +1050,10 @@ pub fn disconnect(
                  {last_deposit_block_hash}"
             )));
         }
-        if block_height - 1 != last_deposit_block_height {
+        if block_height != last_deposit_block_height {
             return Err(Error::DatabaseError(format!(
-                "deposit block height mismatch: {} != \
-                 {last_deposit_block_height}",
-                block_height - 1,
+                "deposit block height mismatch: {block_height} != \
+                 {last_deposit_block_height}"
             )));
         }
         if !state
@@ -1208,12 +1206,12 @@ mod tests {
             .unwrap();
         state
             .withdrawal_bundle_event_blocks
-            .put(&mut rwtxn, &0, &(event_block_hash, block_height - 1))
+            .put(&mut rwtxn, &0, &(event_block_hash, block_height))
             .unwrap();
         // a deposit record at the same sequence index that must survive
         state
             .deposit_blocks
-            .put(&mut rwtxn, &0, &(deposit_block_hash, block_height - 1))
+            .put(&mut rwtxn, &0, &(deposit_block_hash, block_height))
             .unwrap();
         rwtxn.commit().unwrap();
 
