@@ -930,7 +930,11 @@ fn disconnect_event(
             if !state.delete_utxo(rwtxn, &outpoint)? {
                 return Err(Error::NoUtxo { outpoint });
             }
-            *latest_deposit_block_hash = Some(event_block_hash);
+            // Blocks are iterated in reverse here, so the first event block
+            // hash seen is the latest. Keep it to match what `connect` stored.
+            if latest_deposit_block_hash.is_none() {
+                *latest_deposit_block_hash = Some(event_block_hash);
+            }
         }
         BlockEvent::WithdrawalBundle(withdrawal_bundle_event) => {
             let () = disconnect_withdrawal_bundle_event(
@@ -939,7 +943,12 @@ fn disconnect_event(
                 block_height,
                 withdrawal_bundle_event,
             )?;
-            *latest_withdrawal_bundle_event_block_hash = Some(event_block_hash);
+            // Blocks are iterated in reverse here, so the first event block
+            // hash seen is the latest. Keep it to match what `connect` stored.
+            if latest_withdrawal_bundle_event_block_hash.is_none() {
+                *latest_withdrawal_bundle_event_block_hash =
+                    Some(event_block_hash);
+            }
         }
     }
     Ok(())
