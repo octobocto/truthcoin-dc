@@ -456,7 +456,9 @@ impl App {
             let coinbase_address = if new_block_height == 0 {
                 self.wallet.voter_address()?
             } else {
-                self.wallet.get_new_address()?
+                // A template is built on every poll and mostly thrown
+                // away, so it must not derive an address each time.
+                self.wallet.get_receive_address()?
             };
             let coinbase =
                 if tx_fees > bitcoin::Amount::ZERO || new_block_height == 0 {
