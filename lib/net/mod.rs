@@ -355,7 +355,7 @@ impl Net {
     pub fn connect_peer(
         &self,
         env: sneed::Env<heed::WithoutTls>,
-        resolved_addr: ResolvedSeedAddress,
+        mut resolved_addr: ResolvedSeedAddress,
     ) -> Result<(), Error> {
         {
             let active_peers = self.active_peers.read();
@@ -367,18 +367,31 @@ impl Net {
                 }
             }
         }
-        let addr = SocketAddr::new(
-            resolved_addr.first_ip_addr(),
-            resolved_addr.port(),
-        );
-        // This check happens within Quinn with a
-        // generic "invalid remote address". We run the
-        // same check, and provide a friendlier error
-        // message.
-        if addr.ip().is_unspecified() {
-            return Err(Error::UnspecfiedPeerIP(addr.ip()));
-        }
-        let connecting = self.server.connect(addr, "localhost")?;
+        let (addr, connecting) = loop {
+            let addr = SocketAddr::new(
+                resolved_addr.first_ip_addr(),
+                resolved_addr.port(),
+            );
+            // This check happens within Quinn with a
+            // generic "invalid remote address". We run the
+            // same check, and provide a friendlier error
+            // message.
+            if addr.ip().is_unspecified() {
+                return Err(Error::UnspecfiedPeerIP(addr.ip()));
+            }
+            match self.server.connect(addr, "localhost") {
+                Ok(connecting) => break (addr, connecting),
+                Err(err @ quinn::ConnectError::InvalidRemoteAddress(_)) => {
+                    let (_, Some(next_addr)) =
+                        resolved_addr.pop_first_ip_addr()
+                    else {
+                        return Err(err.into());
+                    };
+                    resolved_addr = next_addr;
+                }
+                Err(err) => return Err(err.into()),
+            }
+        };
         // A host name resolves again at each start, so only an IP address
         // goes into the database.
         if let ResolvedSeedAddress::Static(static_addr) = resolved_addr {
