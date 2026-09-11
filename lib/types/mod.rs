@@ -490,6 +490,30 @@ pub struct TxIn {
     pub idx: u32,
 }
 
+/// Step of the sync with the mainchain
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, ToSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum MainchainSyncPhase {
+    #[default]
+    Idle,
+    /// Fetch mainchain headers from the enforcer
+    Headers,
+}
+
+/// Progress of the sync with the mainchain
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, ToSchema,
+)]
+pub struct MainchainSyncProgress {
+    pub phase: MainchainSyncPhase,
+    pub done: u32,
+    pub total: u32,
+    /// Height of the mainchain block that the sync moves to
+    pub tip_height: u32,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum BmmResult {
     Verified,
