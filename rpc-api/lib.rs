@@ -38,6 +38,17 @@ pub struct TxInfo {
     pub txin: Option<TxIn>,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct GetBlockTemplateResponse {
+    /// Block hash to commit to in a BMM request
+    pub critical_hash: BlockHash,
+    /// Block to pass to `connect_block` once its BMM request is included in a
+    /// mainchain block
+    pub block: Block,
+    /// Fees collected by the transactions in the block, in sats
+    pub fees_sats: u64,
+}
+
 pub use truthcoin_dc::state::decisions::DecisionState;
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
