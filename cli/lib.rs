@@ -323,6 +323,10 @@ pub enum Command {
     #[command(name = "connect-peer", alias = "connect")]
     ConnectPeer { addr: SocketAddr },
 
+    /// List the transactions the mempool holds
+    #[command(name = "list-mempool")]
+    ListMempool,
+
     /// List connected peers
     #[command(name = "list-peers", alias = "peers")]
     ListPeers,
@@ -924,6 +928,10 @@ where
         Command::ConnectPeer { addr } => {
             let () = rpc_client.connect_peer(addr).await?;
             format!("Connected to peer: {addr}")
+        }
+        Command::ListMempool => {
+            let txs = rpc_client.list_mempool().await?;
+            json_response(&txs)?
         }
         Command::ListPeers => {
             let peers = rpc_client.list_peers().await?;

@@ -49,6 +49,16 @@ pub struct GetBlockTemplateResponse {
     pub fees_sats: u64,
 }
 
+/// One transaction the mempool holds
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct MempoolTx {
+    /// Blake3 over the borsh encoding
+    pub txid: Txid,
+    /// Borsh size in bytes
+    pub size: u64,
+    pub tx: Transaction,
+}
+
 pub use truthcoin_dc::state::decisions::DecisionState;
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]

@@ -35,9 +35,9 @@ use truthcoin_dc_app_rpc_api::{
     ConsensusResults, CreateTradeRequest, CreateTradeResponse, DecisionFilter,
     DecisionListItem, DecisionState, DecisionSummary, GetBlockTemplateResponse,
     MarketAmplifyBetaRequest, MarketBuyRequest, MarketBuyResponse,
-    MarketSellRequest, MarketSellResponse, ParticipationStats, PeriodStats,
-    PointedSpentOutput, RpcServer, SubmitBallotRequest, TxInfo, VoteFilter,
-    VoteInfo, VoterInfo, VoterInfoFull, VotingPeriodFull,
+    MarketSellRequest, MarketSellResponse, MempoolTx, ParticipationStats,
+    PeriodStats, PointedSpentOutput, RpcServer, SubmitBallotRequest, TxInfo,
+    VoteFilter, VoteInfo, VoterInfo, VoterInfoFull, VotingPeriodFull,
 };
 
 use crate::app::App;
@@ -752,6 +752,21 @@ impl RpcServer for RpcServerImpl {
             .get_latest_failed_bundle_height()
             .map_err(custom_err)?;
         Ok(height)
+    }
+
+    async fn list_mempool(&self) -> RpcResult<Vec<MempoolTx>> {
+        let txs = self.node().get_all_transactions().map_err(custom_err)?;
+        txs.into_iter()
+            .map(|authorized| {
+                let tx = authorized.transaction;
+                let size = borsh::object_length(&tx).map_err(custom_err)?;
+                Ok(MempoolTx {
+                    txid: tx.txid(),
+                    size: size as u64,
+                    tx,
+                })
+            })
+            .collect()
     }
 
     async fn list_peers(&self) -> RpcResult<Vec<Peer>> {

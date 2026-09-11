@@ -11,7 +11,7 @@ use super::{
     M6id, MainchainSyncPhase, MainchainSyncProgress, MarketAmplifyBetaRequest,
     MarketBuyRequest, MarketBuyResponse, MarketCreateRequest,
     MarketCreateResponse, MarketData, MarketOutcome, MarketSellRequest,
-    MarketSellResponse, MarketSummary, MerkleRoot, OutPoint, Output,
+    MarketSellResponse, MarketSummary, MempoolTx, MerkleRoot, OutPoint, Output,
     OutputContent, ParticipationStats, Peer, PeerConnectionStatus,
     PeriodPricingSummary, PeriodStats, PointedOutput, PointedSpentOutput,
     RpcResult, ScoreChange, SharePosition, Signature, SocketAddr, SpentOutput,
@@ -217,6 +217,10 @@ pub trait Rpc {
     async fn latest_failed_withdrawal_bundle_height(
         &self,
     ) -> RpcResult<Option<u32>>;
+
+    /// List the transactions the mempool holds, in no particular order.
+    #[method(name = "list_mempool")]
+    async fn list_mempool(&self) -> RpcResult<Vec<MempoolTx>>;
 
     /// List peers
     #[method(name = "list_peers")]
