@@ -166,6 +166,9 @@ pub(super) struct Cli {
     /// If not set, uses time-based periods (production default).
     #[arg(long)]
     decision_config_testing: Option<u32>,
+    /// Host name of the P2P server. Use this option one time for each name.
+    #[arg(long = "server-name")]
+    server_names: Vec<String>,
     /// ZMQ pub/sub address
     #[cfg(feature = "zmq")]
     #[arg(default_value_t = DEFAULT_ZMQ_ADDR, long, short)]
@@ -219,6 +222,7 @@ impl Cli {
             rpc_host: self.rpc_host,
             rpc_port: self.rpc_port,
             decision_config_testing: self.decision_config_testing,
+            server_names: HashSet::from_iter(self.server_names),
             #[cfg(feature = "zmq")]
             zmq_addr: self.zmq_addr,
         })
@@ -243,6 +247,7 @@ pub struct Config {
     pub rpc_host: Host,
     pub rpc_port: u16,
     pub decision_config_testing: Option<u32>,
+    pub server_names: HashSet<String>,
     #[cfg(feature = "zmq")]
     pub zmq_addr: SocketAddr,
 }

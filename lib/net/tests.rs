@@ -112,9 +112,11 @@ fn ipv4_node_connects_with_both_seed_families() {
         let env = unsafe { sneed::Env::open(&options, dir.path()) }.unwrap();
         let state = State::new(&env, None).unwrap();
         let archive = Archive::new(&env).unwrap();
-        let (remote, _) =
-            super::make_server_endpoint("127.0.0.1:0".parse().unwrap())
-                .unwrap();
+        let (remote, _) = super::make_server_endpoint(
+            "127.0.0.1:0".parse().unwrap(),
+            HashSet::new(),
+        )
+        .unwrap();
         let ipv4 = remote.local_addr().unwrap();
         let ipv6 = SocketAddr::new("::1".parse().unwrap(), ipv4.port());
         {
@@ -137,6 +139,7 @@ fn ipv4_node_connects_with_both_seed_families() {
             Network::Regtest,
             state,
             "0.0.0.0:0".parse().unwrap(),
+            HashSet::new(),
             HashSet::new(),
         )
         .unwrap();
@@ -176,8 +179,10 @@ async fn rejected_duplicate_has_no_peer_close_event() -> anyhow::Result<()> {
         state,
         "127.0.0.1:0".parse()?,
         HashSet::new(),
+        HashSet::new(),
     )?;
-    let (remote, _) = super::make_server_endpoint("127.0.0.1:0".parse()?)?;
+    let (remote, _) =
+        super::make_server_endpoint("127.0.0.1:0".parse()?, HashSet::new())?;
     let addr = remote.local_addr()?;
     net.connect_peer(env.clone(), addr.into())?;
     let context = super::PeerConnectionCtxt {
@@ -244,6 +249,7 @@ fn temp_net_with_peers(
         state,
         "127.0.0.1:0".parse()?,
         add_peers,
+        HashSet::new(),
     )?;
     Ok((dir, env, net, info_rx, dial_seeds))
 }
@@ -251,8 +257,10 @@ fn temp_net_with_peers(
 #[tokio::test]
 async fn connect_peer_keeps_a_static_ipv4_address() -> anyhow::Result<()> {
     let (_dir, env, net, _info_rx) = temp_net()?;
-    let (remote, _) =
-        super::make_server_endpoint((Ipv4Addr::LOCALHOST, 0).into())?;
+    let (remote, _) = super::make_server_endpoint(
+        (Ipv4Addr::LOCALHOST, 0).into(),
+        HashSet::new(),
+    )?;
     let addr = remote.local_addr()?;
 
     net.connect_peer(env, addr.into())?;
@@ -282,8 +290,10 @@ async fn connect_peer_returns_other_quinn_errors() -> anyhow::Result<()> {
 #[tokio::test]
 async fn connect_peer_skips_ipv6_on_an_ipv4_endpoint() -> anyhow::Result<()> {
     let (_dir, env, net, mut info_rx) = temp_net()?;
-    let (remote, _) =
-        super::make_server_endpoint((Ipv4Addr::LOCALHOST, 0).into())?;
+    let (remote, _) = super::make_server_endpoint(
+        (Ipv4Addr::LOCALHOST, 0).into(),
+        HashSet::new(),
+    )?;
     let addr = remote.local_addr()?;
     let next_ip = Ipv4Addr::new(127, 0, 0, 2);
     let resolved = ResolvedSeedAddress::Domain {
@@ -347,8 +357,10 @@ async fn connect_peer_returns_the_last_invalid_address() -> anyhow::Result<()> {
 #[tokio::test]
 async fn a_seed_host_name_dials_at_startup() -> anyhow::Result<()> {
     set_crypto_provider();
-    let (remote, _) =
-        super::make_server_endpoint((Ipv4Addr::LOCALHOST, 0).into())?;
+    let (remote, _) = super::make_server_endpoint(
+        (Ipv4Addr::LOCALHOST, 0).into(),
+        HashSet::new(),
+    )?;
     let addr = remote.local_addr()?;
     let seed_addr: SeedAddress =
         format!("localhost:{}", addr.port()).parse()?;
@@ -368,5 +380,38 @@ async fn a_seed_host_name_dials_at_startup() -> anyhow::Result<()> {
     assert_eq!(peers[0].address, addr);
     let rotxn = env.read_txn()?;
     assert_eq!(net.known_peers.len(&rotxn)?, 0);
+    Ok(())
+}
+
+/// The QUIC server name of a host name peer is the domain.
+#[tokio::test]
+async fn connect_peer_sends_the_domain_as_server_name() -> anyhow::Result<()> {
+    let (_dir, env, net, _info_rx) = temp_net()?;
+    let domain = "seed.truthcoin.test";
+    let (remote, _) = super::make_server_endpoint(
+        (Ipv4Addr::LOCALHOST, 0).into(),
+        HashSet::from([domain.to_owned()]),
+    )?;
+    let addr = remote.local_addr()?;
+    let resolved = ResolvedSeedAddress::Domain {
+        domain: domain.to_owned(),
+        port: addr.port(),
+        addrs: nonempty::NonEmpty::new(addr.ip()),
+    };
+
+    net.connect_peer(env, resolved)?;
+
+    let connection =
+        tokio::time::timeout(Duration::from_secs(5), remote.accept())
+            .await?
+            .context("the endpoint closed before the connection")?
+            .await?;
+    let handshake_data = connection
+        .handshake_data()
+        .context("the connection holds no handshake data")?
+        .downcast::<quinn::crypto::rustls::HandshakeData>()
+        .map_err(|_| anyhow::anyhow!("the handshake data is not rustls"))?;
+    assert_eq!(handshake_data.server_name.as_deref(), Some(domain));
+    remote.close(0_u32.into(), b"test complete");
     Ok(())
 }
