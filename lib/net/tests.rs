@@ -42,7 +42,7 @@ fn ipv4_node_connects_with_both_seed_families() {
         .unwrap();
     runtime.block_on(async {
         let dir = tempfile::tempdir().unwrap();
-        let mut options = heed::EnvOpenOptions::new();
+        let mut options = heed::EnvOpenOptions::new().read_txn_without_tls();
         options
             .map_size(16 * 1024 * 1024)
             .max_dbs(State::NUM_DBS + Archive::NUM_DBS + Net::NUM_DBS);
@@ -94,7 +94,7 @@ async fn rejected_duplicate_has_no_peer_close_event() -> anyhow::Result<()> {
 
     set_crypto_provider();
     let dir = tempfile::tempdir()?;
-    let mut options = heed::EnvOpenOptions::new();
+    let mut options = heed::EnvOpenOptions::new().read_txn_without_tls();
     options
         .map_size(16 * 1024 * 1024)
         .max_dbs(State::NUM_DBS + Archive::NUM_DBS + Net::NUM_DBS);

@@ -98,7 +98,7 @@ impl SyncProgress {
 }
 
 struct MainchainTask<Transport = tonic::transport::Channel> {
-    env: sneed::Env,
+    env: sneed::Env<heed::WithoutTls>,
     archive: Archive,
     mainchain: proto::mainchain::ValidatorClient<Transport>,
     sync_progress: SyncProgress,
@@ -116,7 +116,7 @@ where
     /// including the specified header.
     /// Returns `false` if the specified block was not available.
     async fn request_ancestor_infos(
-        env: &sneed::Env,
+        env: &sneed::Env<heed::WithoutTls>,
         archive: &Archive,
         cusf_mainchain: &mut proto::mainchain::ValidatorClient<Transport>,
         sync_progress: &SyncProgress,
@@ -247,7 +247,7 @@ pub(super) struct MainchainTaskHandle {
 
 impl MainchainTaskHandle {
     pub fn new<Transport>(
-        env: sneed::Env,
+        env: sneed::Env<heed::WithoutTls>,
         archive: Archive,
         mainchain: mainchain::ValidatorClient<Transport>,
     ) -> (Self, mpsc::UnboundedReceiver<Response>)
@@ -369,9 +369,10 @@ mod test {
         }
     }
 
-    fn temp_env() -> anyhow::Result<(tempfile::TempDir, sneed::Env)> {
+    fn temp_env()
+    -> anyhow::Result<(tempfile::TempDir, sneed::Env<heed::WithoutTls>)> {
         let temp_dir = tempfile::tempdir()?;
-        let mut opts = heed::EnvOpenOptions::new();
+        let mut opts = heed::EnvOpenOptions::new().read_txn_without_tls();
         opts.map_size(256 * 1024 * 1024).max_dbs(Archive::NUM_DBS);
         let env = unsafe { sneed::Env::open(&opts, temp_dir.path()) }?;
         Ok((temp_dir, env))

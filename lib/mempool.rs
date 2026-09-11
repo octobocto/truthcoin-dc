@@ -65,7 +65,7 @@ const MAX_MEMPOOL_TRANSACTIONS: usize = 5000;
 impl MemPool {
     pub const NUM_DBS: u32 = 7;
 
-    pub fn new(env: &sneed::Env) -> Result<Self, Error> {
+    pub fn new<Tls>(env: &sneed::Env<Tls>) -> Result<Self, Error> {
         let mut rwtxn = env.write_txn()?;
         let transactions =
             DatabaseUnique::create(env, &mut rwtxn, "transactions")?;

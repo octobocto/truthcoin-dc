@@ -93,7 +93,10 @@ pub struct VotingSystem {
 impl VotingSystem {
     pub const NUM_DBS: u32 = VotingDatabases::NUM_DBS;
 
-    pub fn new(env: &Env, rwtxn: &mut RwTxn<'_>) -> Result<Self, Error> {
+    pub fn new<Tls>(
+        env: &Env<Tls>,
+        rwtxn: &mut RwTxn<'_>,
+    ) -> Result<Self, Error> {
         let databases = VotingDatabases::new(env, rwtxn)?;
         Ok(Self { databases })
     }

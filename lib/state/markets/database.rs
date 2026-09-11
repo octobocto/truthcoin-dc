@@ -41,7 +41,7 @@ pub struct MarketsDatabase {
 impl MarketsDatabase {
     pub const NUM_DBS: u32 = 7;
 
-    pub fn new(env: &Env, rwtxn: &mut RwTxn) -> Result<Self, Error> {
+    pub fn new<Tls>(env: &Env<Tls>, rwtxn: &mut RwTxn) -> Result<Self, Error> {
         let markets = DatabaseUnique::create(env, rwtxn, "markets")?;
         let state_index =
             DatabaseUnique::create(env, rwtxn, "markets_by_state")?;

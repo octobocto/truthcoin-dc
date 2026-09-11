@@ -122,7 +122,7 @@ pub struct Node<MainchainTransport = Channel> {
     cusf_mainchain: Arc<Mutex<mainchain::ValidatorClient<MainchainTransport>>>,
     cusf_mainchain_wallet:
         Option<Arc<Mutex<mainchain::WalletClient<MainchainTransport>>>>,
-    env: sneed::Env,
+    env: sneed::Env<heed::WithoutTls>,
     mainchain_task: MainchainTaskHandle,
     mempool: MemPool,
     net: Net,
@@ -159,7 +159,8 @@ where
         let env_path = datadir.join("data.mdb");
         std::fs::create_dir_all(&env_path)?;
         let env = {
-            let mut env_open_opts = heed::EnvOpenOptions::new();
+            let mut env_open_opts =
+                heed::EnvOpenOptions::new().read_txn_without_tls();
             env_open_opts
                 .map_size(128 * 1024 * 1024 * 1024) // 128 GB
                 .max_dbs(
@@ -181,24 +182,20 @@ where
             // - NO_READ_AHEAD disables kernel readahead that would otherwise
             //   touch cold pages we immediately overwrite, improving random
             //   access behaviour on SSDs used in testing.
-            // - NO_TLS stops LMDB from relying on thread-local storage for
-            //   reader slots so transactions can be moved across Tokio tasks.
             // WRITE_MAP/MAP_ASYNC/NO_READ_AHEAD are gated off on
             // Windows: LMDB's writable-mmap path returns
             // ERROR_INVALID_HANDLE on commit there, and
             // NO_READ_AHEAD has no effect without posix_madvise.
-            // NO_SYNC/NO_META_SYNC/NO_TLS are kept on every platform
+            // NO_SYNC/NO_META_SYNC are kept on every platform
             // since their tradeoffs are OS-independent.
             #[cfg(not(windows))]
             let fast_flags = EnvFlags::WRITE_MAP
                 | EnvFlags::MAP_ASYNC
                 | EnvFlags::NO_SYNC
                 | EnvFlags::NO_META_SYNC
-                | EnvFlags::NO_READ_AHEAD
-                | EnvFlags::NO_TLS;
+                | EnvFlags::NO_READ_AHEAD;
             #[cfg(windows)]
-            let fast_flags =
-                EnvFlags::NO_SYNC | EnvFlags::NO_META_SYNC | EnvFlags::NO_TLS;
+            let fast_flags = EnvFlags::NO_SYNC | EnvFlags::NO_META_SYNC;
             unsafe { env_open_opts.flags(fast_flags) };
             unsafe { Env::open(&env_open_opts, &env_path) }?
         };
@@ -245,7 +242,7 @@ where
         })
     }
 
-    pub fn env(&self) -> &Env {
+    pub fn env(&self) -> &Env<heed::WithoutTls> {
         &self.env
     }
 
@@ -1691,7 +1688,9 @@ where
         )?)
     }
 
-    pub fn read_txn(&self) -> Result<sneed::RoTxn<'_>, Error> {
+    pub fn read_txn(
+        &self,
+    ) -> Result<sneed::RoTxn<'_, heed::WithoutTls>, Error> {
         self.env.read_txn().map_err(Into::into)
     }
 

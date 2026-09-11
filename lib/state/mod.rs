@@ -221,8 +221,8 @@ impl State {
         + Self::BASE_DBS
         + Self::UNDO_DBS;
 
-    pub fn new(
-        env: &sneed::Env,
+    pub fn new<Tls>(
+        env: &sneed::Env<Tls>,
         decision_config_testing: Option<u32>,
     ) -> Result<Self, Error> {
         let mut rwtxn = env.write_txn()?;
