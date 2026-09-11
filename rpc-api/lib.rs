@@ -13,9 +13,10 @@ use truthcoin_dc::{
     types::{
         Address, AssetId, Authorization, BitcoinOutputContent, Block,
         BlockHash, Body, EncryptionPubKey, FilledOutputContent, Header,
-        MerkleRoot, OutPoint, Output, OutputContent, PointedOutput,
-        Transaction, TxData, TxIn, Txid, VerifyingKey, WithdrawalBundle,
-        WithdrawalOutputContent, schema as truthcoin_schema,
+        MainchainSyncPhase, MainchainSyncProgress, MerkleRoot, OutPoint,
+        Output, OutputContent, PointedOutput, Transaction, TxData, TxIn, Txid,
+        VerifyingKey, WithdrawalBundle, WithdrawalOutputContent,
+        schema as truthcoin_schema,
     },
     wallet::Balance,
 };

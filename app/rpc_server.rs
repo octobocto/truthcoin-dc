@@ -24,8 +24,8 @@ use truthcoin_dc::{
     state::period_to_name,
     types::{
         Address, Authorization, Block, BlockHash, EncryptionPubKey,
-        FilledOutputContent, PointedOutput, Transaction, Txid, VerifyingKey,
-        WithdrawalBundle,
+        FilledOutputContent, MainchainSyncProgress, PointedOutput, Transaction,
+        Txid, VerifyingKey, WithdrawalBundle,
     },
     validation::DecisionValidator,
     wallet::{Balance, CreateMarketInput, DecisionClaimInput},
@@ -711,6 +711,12 @@ impl RpcServer for RpcServerImpl {
             .map(|(outpoint, output)| PointedOutput { outpoint, output })
             .collect();
         Ok(res)
+    }
+
+    async fn mainchain_sync_progress(
+        &self,
+    ) -> RpcResult<MainchainSyncProgress> {
+        Ok(self.node().mainchain_sync_progress())
     }
 
     async fn mine(&self, fee: Option<u64>) -> RpcResult<()> {

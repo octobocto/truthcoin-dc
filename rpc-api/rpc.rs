@@ -7,10 +7,11 @@ use super::{
     DecisionListingFeeInfo, DecisionPeriodStatus, DecisionState,
     DecisionSummary, DecisionType, DimensionInput, Dst, EncryptionPubKey,
     FilledOutputContent, Header, InitialLiquidityCalculation,
-    MarketAmplifyBetaRequest, MarketBuyRequest, MarketBuyResponse,
-    MarketCreateRequest, MarketCreateResponse, MarketData, MarketOutcome,
-    MarketSellRequest, MarketSellResponse, MarketSummary, MerkleRoot, OutPoint,
-    Output, OutputContent, ParticipationStats, Peer, PeerConnectionStatus,
+    MainchainSyncPhase, MainchainSyncProgress, MarketAmplifyBetaRequest,
+    MarketBuyRequest, MarketBuyResponse, MarketCreateRequest,
+    MarketCreateResponse, MarketData, MarketOutcome, MarketSellRequest,
+    MarketSellResponse, MarketSummary, MerkleRoot, OutPoint, Output,
+    OutputContent, ParticipationStats, Peer, PeerConnectionStatus,
     PeriodPricingSummary, PeriodStats, PointedOutput, RpcResult, ScoreChange,
     SharePosition, Signature, SocketAddr, Transaction, TxData, TxIn, TxInfo,
     Txid, UserHoldings, VerifyingKey, VoteFilter, VoteInfo, VoterInfo,
@@ -28,8 +29,8 @@ use super::{
     MarketCreateRequest, MarketCreateResponse, PeriodPricingSummary,
     ConsensusResults, DecisionSummary,
     EncryptionPubKey, FilledOutputContent, Header, InitialLiquidityCalculation,
-    MarketBuyRequest, MarketBuyResponse, MarketData, MarketOutcome,
-    MarketSellRequest, MarketSellResponse, MarketSummary,
+    MainchainSyncPhase, MarketBuyRequest, MarketBuyResponse, MarketData,
+    MarketOutcome, MarketSellRequest, MarketSellResponse, MarketSummary,
     MerkleRoot, OutPoint, Output, OutputContent,
     ParticipationStats, PeerConnectionStatus, PeriodStats,
     ScoreChange,
@@ -193,6 +194,12 @@ pub trait Rpc {
     async fn list_utxos(
         &self,
     ) -> RpcResult<Vec<PointedOutput<FilledOutputContent>>>;
+
+    /// Get the progress of the sync with the mainchain
+    #[open_api_method(output_schema(ToSchema))]
+    #[method(name = "mainchain_sync_progress")]
+    async fn mainchain_sync_progress(&self)
+    -> RpcResult<MainchainSyncProgress>;
 
     /// Attempt to mine a sidechain block
     #[open_api_method(output_schema(ToSchema))]
