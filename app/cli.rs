@@ -257,6 +257,65 @@ impl Config {
         Url::parse(&format!("http://{}:{}", self.rpc_host, self.rpc_port))
             .unwrap()
     }
+
+    /// Log all fields at info level
+    #[track_caller]
+    pub fn log_all_fields(&self, msg: &str) {
+        let Self {
+            add_peers,
+            datadir,
+            decision_config_testing,
+            file_log_level,
+            headless,
+            log_dir,
+            log_level,
+            mainchain_grpc_url,
+            mnemonic_seed_phrase_path,
+            net_addr,
+            network,
+            network_magic_override,
+            rpc_host,
+            rpc_port,
+            server_names,
+            #[cfg(feature = "zmq")]
+            zmq_addr,
+        } = self;
+        #[cfg(feature = "zmq")]
+        let zmq_addr = Some(zmq_addr);
+        #[cfg(not(feature = "zmq"))]
+        let zmq_addr: Option<&SocketAddr> = None;
+        let add_peers = std::fmt::from_fn(|f| {
+            f.debug_set()
+                .entries(add_peers.iter().map(|peer_addr| {
+                    std::fmt::from_fn(|f| std::fmt::Display::fmt(peer_addr, f))
+                }))
+                .finish()
+        });
+        tracing::info!(
+            %add_peers,
+            datadir = %datadir.display(),
+            ?decision_config_testing,
+            %file_log_level,
+            %headless,
+            log_dir = log_dir.as_ref().map(|path|
+                tracing::field::display(path.display())
+            ),
+            %log_level,
+            %mainchain_grpc_url,
+            mnemonic_seed_phrase_path = mnemonic_seed_phrase_path.as_ref()
+                .map(|path| tracing::field::display(path.display())),
+            %net_addr,
+            %network,
+            network_magic_override = network_magic_override.map(|magic|
+                tracing::field::display(const_hex::encode(magic))
+            ),
+            %rpc_host,
+            %rpc_port,
+            ?server_names,
+            zmq_addr = zmq_addr.map(tracing::field::display),
+            msg,
+        )
+    }
 }
 
 #[cfg(test)]
