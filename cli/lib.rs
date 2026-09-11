@@ -302,6 +302,11 @@ pub enum Command {
     #[command(name = "latest-failed-withdrawal-bundle-height")]
     LatestFailedWithdrawalBundleHeight,
 
+    /// Invalidate a block and its descendants. If the tip descends from the
+    /// block, re-org to the parent of the block.
+    #[command(name = "invalidate-block")]
+    InvalidateBlock { block_hash: BlockHash },
+
     /// Remove transaction from mempool
     #[command(name = "remove-from-mempool")]
     RemoveFromMempool { txid: Txid },
@@ -897,6 +902,10 @@ where
             let height =
                 rpc_client.latest_failed_withdrawal_bundle_height().await?;
             json_response(&height)?
+        }
+        Command::InvalidateBlock { block_hash } => {
+            let () = rpc_client.invalidate_block(block_hash).await?;
+            format!("Block {block_hash} invalidated")
         }
         Command::RemoveFromMempool { txid } => {
             let () = rpc_client.remove_from_mempool(txid).await?;
