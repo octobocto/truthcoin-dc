@@ -14,7 +14,6 @@ tonic-prost-build = "0.14.3"
 
 [dependencies]
 addr = "0.15.6"
-anyhow = { workspace = true, features = ["backtrace"] }
 async-lock = "3.4.0"
 bech32 = "0.11.0"
 bincode = { workspace = true }
@@ -89,6 +88,7 @@ default-features = false
 features = ["quanta", "std"]
 
 [dev-dependencies]
+anyhow = { workspace = true }
 tempfile = "3.10.1"
 approx = "0.5.1"
 criterion = { version = "0.5.1", features = ["html_reports"] }

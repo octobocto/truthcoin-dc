@@ -33,6 +33,7 @@ use crate::{
             },
         },
     },
+    util::ErrorChain,
 };
 
 /// Request data from the mainchain node
@@ -689,10 +690,10 @@ where
                 Ok(()) => {
                     tracing::warn!("Mainchain task: the event stream closed")
                 }
-                Err(err) => {
-                    let err = anyhow::Error::from(err);
-                    tracing::error!("Mainchain task error: {err:#}");
-                }
+                Err(err) => tracing::error!(
+                    "Mainchain task error: {:#}",
+                    ErrorChain::new(&err)
+                ),
             }
             tokio::time::sleep(RECONNECT_DELAY).await;
             tracing::info!("Mainchain task: connecting to the mainchain node");

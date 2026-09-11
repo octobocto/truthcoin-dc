@@ -37,6 +37,9 @@ use sneed::RwTxn;
 mod mainchain_task;
 mod net_task;
 
+pub(crate) use mainchain_task::ResponseError;
+pub(crate) use net_task::MainchainAncestors;
+
 use mainchain_task::MainchainTaskHandle;
 use net_task::NetTaskHandle;
 #[cfg(feature = "zmq")]
@@ -90,8 +93,6 @@ pub enum Error {
     State(#[source] Box<state::Error>),
     #[error("Utreexo error: {0}")]
     Utreexo(String),
-    #[error("Verify BMM error")]
-    VerifyBmm(anyhow::Error),
     #[cfg(feature = "zmq")]
     #[error("ZMQ error")]
     Zmq(#[from] zeromq::ZmqError),

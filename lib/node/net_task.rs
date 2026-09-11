@@ -46,6 +46,15 @@ use crate::{
     util::{ErrorChain, join_set},
 };
 
+/// Error fetching mainchain ancestors for a peer
+#[derive(Debug, thiserror::Error)]
+pub enum MainchainAncestors {
+    #[error("Requested block was not available: {block_hash}")]
+    BlockNotAvailable { block_hash: bitcoin::BlockHash },
+    #[error(transparent)]
+    MainchainTaskResponse(#[from] Arc<mainchain_task::ResponseError>),
+}
+
 #[allow(clippy::duplicated_attributes)]
 #[derive(thiserror::Error, transitive::Transitive, Debug)]
 #[transitive(
@@ -124,8 +133,7 @@ impl ZmqPubHandler {
                     },
                 ))
                 .unwrap_or_else(|err: zeromq::ZmqError| {
-                    let err = anyhow::Error::from(err);
-                    tracing::error!("{err:#}");
+                    tracing::error!("{:#}", ErrorChain::new(&err));
                 })
         });
         Ok(Self {
@@ -1055,14 +1063,14 @@ impl NetTask {
                         ),
                         Ok(false) => {
                             PeerConnectionMessage::MainchainAncestorsError(
-                                anyhow::anyhow!(
-                                    "Requested block was not available: {block_hash}"
-                                ),
+                                MainchainAncestors::BlockNotAvailable {
+                                    block_hash,
+                                },
                             )
                         }
                         Err(ref err) => {
                             PeerConnectionMessage::MainchainAncestorsError(
-                                anyhow::Error::from(err.clone()),
+                                err.clone().into(),
                             )
                         }
                     };
@@ -1146,9 +1154,9 @@ impl NetTask {
                 let non_fatal_err:
                     <net::error::AcceptConnection as error_fatality::Split>::Jfyi =
                     non_fatal_err;
-                let non_fatal_err = anyhow::Error::from(non_fatal_err);
                 tracing::error!(
-                    "Failed to accept connection: {non_fatal_err:#}"
+                    "Failed to accept connection: {:#}",
+                    ErrorChain::new(&non_fatal_err)
                 );
                 None
             }
@@ -1211,9 +1219,9 @@ impl NetTask {
                     Err(fatal_err) => {
                         let fatal_err: <net::error::AcceptConnection as error_fatality::Split>::Fatal =
                             fatal_err;
-                        let fatal_err = anyhow::Error::from(fatal_err);
                         tracing::error!(
-                            "failed to accept connection: {fatal_err:#}"
+                            "failed to accept connection: {:#}",
+                            ErrorChain::new(&fatal_err)
                         );
                     }
                 },
@@ -1370,8 +1378,7 @@ impl NetTask {
                                 .is_duplicate_connection()
                                 || err.is_connect_timeout();
                             let bad_magic = err.is_bad_magic();
-                            let err = anyhow::anyhow!(err);
-                            tracing::error!(%addr, err = format!("{err:#}"), "Peer connection error");
+                            tracing::error!(%addr, err = format!("{:#}", ErrorChain::new(&err)), "Peer connection error");
                             let () = self.ctxt.net.remove_active_peer(addr);
                             // A peer on another network never becomes useful,
                             // so it must not survive into the next start.
@@ -1513,10 +1520,10 @@ impl NetTask {
                     {
                         Ok(()) => (),
                         Err(err) => {
-                            let err = anyhow::Error::from(err);
                             tracing::error!(
                                 %peer_address,
-                                "Failed to connect to peer: {err:#}"
+                                "Failed to connect to peer: {:#}",
+                                ErrorChain::new(&err)
                             )
                         }
                     }
@@ -1573,8 +1580,7 @@ impl NetTaskHandle {
         };
         let task = runtime.spawn(async {
             if let Err(err) = task.run().await {
-                let err = anyhow::Error::from(err);
-                tracing::error!("Net task error: {err:#}");
+                tracing::error!("Net task error: {:#}", ErrorChain::new(&err));
             }
         });
         NetTaskHandle {
