@@ -30,7 +30,7 @@ use truthcoin_dc::{
         PointedOutput, Transaction, Txid, VerifyingKey, WithdrawalBundle,
     },
     validation::DecisionValidator,
-    wallet::{Balance, CreateMarketInput, DecisionClaimInput},
+    wallet::{Balance, CreateMarketInput, DecisionClaimInput, TransferDests},
 };
 use truthcoin_dc_app_rpc_api::{
     ConsensusResults, CreateTradeRequest, CreateTradeResponse, DecisionFilter,
@@ -976,6 +976,28 @@ impl RpcServer for RpcServerImpl {
                 Amount::from_sat(fee_sats),
                 memo,
             )
+            .map_err(custom_err)?;
+        let txid = tx.txid();
+        let () = self.app.sign_and_send(tx).map_err(custom_err)?;
+        Ok(txid)
+    }
+
+    async fn transfer_many(
+        &self,
+        dests: TransferDests,
+        fee_sats: u64,
+    ) -> RpcResult<Txid> {
+        let dests = dests
+            .0
+            .into_iter()
+            .map(|(address, value_sats)| {
+                (address, Amount::from_sat(value_sats))
+            })
+            .collect();
+        let tx = self
+            .app
+            .wallet
+            .create_transfer_many(&dests, Amount::from_sat(fee_sats))
             .map_err(custom_err)?;
         let txid = tx.txid();
         let () = self.app.sign_and_send(tx).map_err(custom_err)?;

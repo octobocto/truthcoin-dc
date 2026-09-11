@@ -15,10 +15,10 @@ use super::{
     MempoolTx, MerkleRoot, OutPoint, Output, OutputContent, ParticipationStats,
     Peer, PeerConnectionStatus, PeriodPricingSummary, PeriodStats,
     PointedOutput, PointedSpentOutput, RpcResult, ScoreChange, SharePosition,
-    Signature, SocketAddr, SpentOutput, Transaction, TxData, TxIn, TxInfo,
-    Txid, UserHoldings, VerifyingKey, VoteFilter, VoteInfo, VoterInfo,
-    VoterInfoFull, VotingPeriodFull, WithdrawalBundle, WithdrawalOutputContent,
-    open_api, rpc, schema, truthcoin_schema,
+    Signature, SocketAddr, SpentOutput, Transaction, TransferDests, TxData,
+    TxIn, TxInfo, Txid, UserHoldings, VerifyingKey, VoteFilter, VoteInfo,
+    VoterInfo, VoterInfoFull, VotingPeriodFull, WithdrawalBundle,
+    WithdrawalOutputContent, open_api, rpc, schema, truthcoin_schema,
 };
 
 #[open_api(ref_schemas[
@@ -343,6 +343,15 @@ pub trait Rpc {
         value: u64,
         fee: u64,
         memo: Option<String>,
+    ) -> RpcResult<Txid>;
+
+    /// Transfer funds to each address in `dests`, which maps an address to a
+    /// value in sats
+    #[method(name = "transfer_many")]
+    async fn transfer_many(
+        &self,
+        dests: TransferDests,
+        fee_sats: u64,
     ) -> RpcResult<Txid>;
 
     /// Transfer votecoin to the specified address

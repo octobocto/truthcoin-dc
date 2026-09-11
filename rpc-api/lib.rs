@@ -20,7 +20,7 @@ use truthcoin_dc::{
         VerifyingKey, WithdrawalBundle, WithdrawalOutputContent,
         schema as truthcoin_schema,
     },
-    wallet::Balance,
+    wallet::{Balance, TransferDests},
 };
 use utoipa::ToSchema;
 

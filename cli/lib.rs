@@ -16,6 +16,7 @@ use truthcoin_dc::{
         Address, AuthorizedTransaction, BlockHash, EncryptionPubKey,
         THIS_SIDECHAIN, Transaction, Txid, VerifyingKey,
     },
+    wallet::TransferDests,
 };
 use truthcoin_dc_app_rpc_api::RpcClient;
 use url::{Host, Url};
@@ -126,6 +127,10 @@ fn format_with_commas(n: u64) -> String {
         out.push(*c as char);
     }
     out
+}
+
+fn parse_transfer_dests(s: &str) -> Result<TransferDests, serde_json::Error> {
+    serde_json::from_str(s)
 }
 
 #[derive(Clone, Debug, Subcommand)]
@@ -386,6 +391,16 @@ pub enum Command {
         address: Address,
         #[arg(long)]
         msg: String,
+    },
+
+    /// Transfer funds to each address in a JSON map of address to value in
+    /// sats, such as `{"<address>": 1000}`
+    #[command(name = "transfer-many")]
+    TransferMany {
+        #[arg(value_parser = parse_transfer_dests)]
+        dests: TransferDests,
+        #[arg(long)]
+        fee_sats: u64,
     },
 
     /// Verify signature
@@ -821,6 +836,10 @@ where
             let txid = rpc_client
                 .transfer(dest, value_sats, fee_sats, None)
                 .await?;
+            format_tx_success("Transfer", None, &txid.to_string())
+        }
+        Command::TransferMany { dests, fee_sats } => {
+            let txid = rpc_client.transfer_many(dests, fee_sats).await?;
             format_tx_success("Transfer", None, &txid.to_string())
         }
         Command::Withdraw {
@@ -1527,5 +1546,43 @@ impl Cli {
 
         let result = handle_command(&client, self.command).await?;
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    #[test]
+    fn parse_transfer_many() {
+        let address = Address([1u8; 20]);
+        let cli = Cli::parse_from([
+            "truthcoin_dc_app_cli",
+            "transfer-many",
+            &format!("{{\"{address}\": 1000}}"),
+            "--fee-sats",
+            "500",
+        ]);
+        let Command::TransferMany { dests, fee_sats } = cli.command else {
+            panic!("expected transfer-many");
+        };
+        assert_eq!(dests.0, BTreeMap::from([(address, 1000)]));
+        assert_eq!(fee_sats, 500);
+    }
+
+    // A repeated address must not silently drop one of the two payments.
+    #[test]
+    fn refuse_a_repeated_address() {
+        let address = Address([1u8; 20]);
+        let result = Cli::try_parse_from([
+            "truthcoin_dc_app_cli",
+            "transfer-many",
+            &format!("{{\"{address}\": 1000, \"{address}\": 5000}}"),
+            "--fee-sats",
+            "500",
+        ]);
+        assert!(result.is_err());
     }
 }

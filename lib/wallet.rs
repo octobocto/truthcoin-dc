@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     path::Path,
 };
 
@@ -99,6 +99,18 @@ pub struct Balance {
     pub available: Amount,
 }
 
+/// Destinations of a transfer. Each address takes a value in sats.
+/// A repeated address is an error.
+#[serde_with::serde_as]
+#[derive(
+    Clone, Debug, Deserialize, PartialEq, Eq, Serialize, utoipa::ToSchema,
+)]
+#[schema(value_type = BTreeMap<String, u64>)]
+pub struct TransferDests(
+    #[serde_as(as = "serde_with::MapPreventDuplicates<_, _>")]
+    pub  BTreeMap<Address, u64>,
+);
+
 #[derive(Debug, Error)]
 #[error("Message signature verification key {vk} does not exist")]
 pub struct VkDoesNotExistError {
@@ -150,6 +162,8 @@ pub enum Error {
     NoSeed,
     #[error("not enough funds")]
     NotEnoughFunds,
+    #[error("no transfer destination")]
+    NoTransferDestination,
     #[error("utxo does not exist")]
     NoUtxo,
     #[error("failed to parse mnemonic seed phrase")]
@@ -608,16 +622,54 @@ impl Wallet {
         fee: bitcoin::Amount,
         memo: Option<Vec<u8>>,
     ) -> Result<Transaction, Error> {
+        self.create_transfer_to(
+            vec![Output {
+                address,
+                content: OutputContent::Bitcoin(BitcoinOutputContent(value)),
+                memo: memo.unwrap_or_default(),
+            }],
+            fee,
+        )
+    }
+
+    /// Pay each address in `dests`, and pay the change to a new address
+    pub fn create_transfer_many(
+        &self,
+        dests: &BTreeMap<Address, bitcoin::Amount>,
+        fee: bitcoin::Amount,
+    ) -> Result<Transaction, Error> {
+        if dests.is_empty() {
+            return Err(Error::NoTransferDestination);
+        }
+        let outputs = dests
+            .iter()
+            .map(|(address, value)| {
+                Output::new(
+                    *address,
+                    OutputContent::Bitcoin(BitcoinOutputContent(*value)),
+                )
+            })
+            .collect();
+        self.create_transfer_to(outputs, fee)
+    }
+
+    /// Fund `outputs` and `fee`, and pay the change to a new address
+    fn create_transfer_to(
+        &self,
+        mut outputs: Vec<Output>,
+        fee: bitcoin::Amount,
+    ) -> Result<Transaction, Error> {
+        let value = outputs
+            .iter()
+            .try_fold(bitcoin::Amount::ZERO, |total, output| {
+                total.checked_add(output.get_bitcoin_value())
+            })
+            .ok_or(AmountOverflowError)?;
         let (total, coins) = self.select_bitcoins(
             value.checked_add(fee).ok_or(AmountOverflowError)?,
         )?;
         let change = total - value - fee;
         let inputs = coins.into_keys().collect();
-        let mut outputs = vec![Output {
-            address,
-            content: OutputContent::Bitcoin(BitcoinOutputContent(value)),
-            memo: memo.unwrap_or_default(),
-        }];
         self.push_bitcoin_change(&mut outputs, change)?;
         Ok(Transaction::new(inputs, outputs))
     }
@@ -1405,13 +1457,14 @@ impl Watchable<()> for Wallet {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
 
     use crate::{
         types::{
-            BitcoinOutputContent, FilledOutput, FilledOutputContent, OutPoint,
+            Address, BitcoinOutputContent, FilledOutput, FilledOutputContent,
+            GetBitcoinValue as _, OutPoint, Output,
         },
-        wallet::Wallet,
+        wallet::{Error, Wallet},
     };
 
     #[test]
@@ -1505,6 +1558,147 @@ mod test {
         assert_eq!(addr3, addr4);
 
         // Clean up
+        let _unused = std::fs::remove_dir_all(&test_dir);
+        Ok(())
+    }
+
+    fn funded_wallet(
+        name: &str,
+        values_sats: &[u64],
+    ) -> anyhow::Result<(std::path::PathBuf, Wallet)> {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos();
+        let test_dir =
+            std::env::temp_dir().join(format!("truthcoin_test_{name}_{nanos}"));
+        if test_dir.exists() {
+            let _unused = std::fs::remove_dir_all(&test_dir);
+        }
+        let wallet = Wallet::new(&test_dir)?;
+        wallet.set_seed(&[2u8; 64])?;
+
+        let mut utxos = HashMap::new();
+        for (index, value_sats) in values_sats.iter().enumerate() {
+            let outpoint = OutPoint::Regular {
+                txid: [index as u8; 32].into(),
+                vout: 0,
+            };
+            let output = FilledOutput {
+                address: wallet.get_new_address()?,
+                content: FilledOutputContent::Bitcoin(BitcoinOutputContent(
+                    bitcoin::Amount::from_sat(*value_sats),
+                )),
+                memo: Vec::new(),
+            };
+            utxos.insert(outpoint, output);
+        }
+        wallet.put_utxos(&utxos)?;
+        Ok((test_dir, wallet))
+    }
+
+    fn value_of(output: &Output) -> u64 {
+        output.get_bitcoin_value().to_sat()
+    }
+
+    #[test]
+    fn test_create_transfer_many_pays_each_address() -> anyhow::Result<()> {
+        let (test_dir, wallet) = funded_wallet("transfer_many", &[10_000])?;
+
+        let dests = BTreeMap::from([
+            (Address([1u8; 20]), bitcoin::Amount::from_sat(1000)),
+            (Address([2u8; 20]), bitcoin::Amount::from_sat(2000)),
+            (Address([3u8; 20]), bitcoin::Amount::from_sat(3000)),
+        ]);
+        let fee = bitcoin::Amount::from_sat(500);
+        let tx = wallet.create_transfer_many(&dests, fee)?;
+
+        assert_eq!(tx.outputs.len(), 4);
+        for (index, (address, value)) in dests.iter().enumerate() {
+            assert_eq!(tx.outputs[index].address, *address);
+            assert_eq!(value_of(&tx.outputs[index]), value.to_sat());
+        }
+        let change = &tx.outputs[3];
+        assert_eq!(value_of(change), 10_000 - 1000 - 2000 - 3000 - 500);
+        assert!(wallet.get_addresses()?.contains(&change.address));
+
+        let _unused = std::fs::remove_dir_all(&test_dir);
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_transfer_keeps_one_payment_and_change() -> anyhow::Result<()>
+    {
+        let (test_dir, wallet) = funded_wallet("transfer_one", &[10_000])?;
+
+        let dest = Address([4u8; 20]);
+        let tx = wallet.create_transfer(
+            dest,
+            bitcoin::Amount::from_sat(1000),
+            bitcoin::Amount::from_sat(500),
+            Some(vec![0xab]),
+        )?;
+
+        assert_eq!(tx.outputs.len(), 2);
+        assert_eq!(tx.outputs[0].address, dest);
+        assert_eq!(value_of(&tx.outputs[0]), 1000);
+        assert_eq!(tx.outputs[0].memo, [0xab]);
+        assert_eq!(value_of(&tx.outputs[1]), 10_000 - 1000 - 500);
+        assert!(wallet.get_addresses()?.contains(&tx.outputs[1].address));
+
+        let _unused = std::fs::remove_dir_all(&test_dir);
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_transfer_many_rejects_an_overflow() -> anyhow::Result<()> {
+        let (test_dir, wallet) = funded_wallet("transfer_overflow", &[10_000])?;
+
+        let half = bitcoin::Amount::from_sat(bitcoin::Amount::MAX.to_sat() / 2);
+        let dests = BTreeMap::from([
+            (Address([1u8; 20]), half),
+            (Address([2u8; 20]), half + bitcoin::Amount::from_sat(1)),
+        ]);
+        let result =
+            wallet.create_transfer_many(&dests, bitcoin::Amount::from_sat(500));
+        assert!(matches!(result, Err(Error::AmountOverflow(_))));
+
+        let _unused = std::fs::remove_dir_all(&test_dir);
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_transfer_many_needs_a_destination() -> anyhow::Result<()> {
+        let (test_dir, wallet) = funded_wallet("transfer_none", &[10_000])?;
+
+        let result = wallet.create_transfer_many(
+            &BTreeMap::new(),
+            bitcoin::Amount::from_sat(500),
+        );
+        assert!(matches!(result, Err(Error::NoTransferDestination)));
+
+        let _unused = std::fs::remove_dir_all(&test_dir);
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_transfer_many_totals_the_values() -> anyhow::Result<()> {
+        let (test_dir, wallet) =
+            funded_wallet("transfer_total", &[1000, 1000])?;
+
+        let dests = BTreeMap::from([
+            (Address([1u8; 20]), bitcoin::Amount::from_sat(900)),
+            (Address([2u8; 20]), bitcoin::Amount::from_sat(900)),
+        ]);
+        // Each coin alone is too small, so the sum decides the selection.
+        let tx = wallet
+            .create_transfer_many(&dests, bitcoin::Amount::from_sat(100))?;
+        assert_eq!(tx.inputs.len(), 2);
+        assert_eq!(value_of(&tx.outputs[2]), 100);
+
+        let result = wallet
+            .create_transfer_many(&dests, bitcoin::Amount::from_sat(1000));
+        assert!(matches!(result, Err(Error::NotEnoughFunds)));
+
         let _unused = std::fs::remove_dir_all(&test_dir);
         Ok(())
     }

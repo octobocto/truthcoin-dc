@@ -11,6 +11,7 @@ mod list_mempool;
 mod receive_address;
 mod roundtrip;
 mod setup;
+mod transfer_many;
 mod unknown_withdrawal;
 mod util;
 
