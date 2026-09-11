@@ -167,6 +167,10 @@ pub enum Command {
     #[command(name = "list-utxos")]
     ListUtxos,
 
+    /// Get the progress of the sync with the mainchain
+    #[command(name = "mainchain-sync-progress")]
+    MainchainSyncProgress,
+
     /// Transfer funds to address
     #[command(name = "transfer", alias = "send")]
     Transfer {
@@ -721,6 +725,10 @@ where
         Command::ListUtxos => {
             let utxos = rpc_client.list_utxos().await?;
             json_response(&utxos)?
+        }
+        Command::MainchainSyncProgress => {
+            let progress = rpc_client.mainchain_sync_progress().await?;
+            json_response(&progress)?
         }
         Command::Transfer {
             dest,
