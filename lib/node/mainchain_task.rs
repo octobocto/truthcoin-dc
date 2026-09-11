@@ -145,6 +145,19 @@ impl SyncProgress {
         };
     }
 
+    fn start_writing(&self, tip_height: u32, total: u32) {
+        *self.0.lock() = MainchainSyncProgress {
+            phase: MainchainSyncPhase::Writing,
+            done: 0,
+            total,
+            tip_height,
+        };
+    }
+
+    fn wrote_headers(&self, headers: u32) {
+        self.0.lock().done += headers;
+    }
+
     fn set_idle(&self) {
         *self.0.lock() = MainchainSyncProgress::default();
     }
@@ -273,9 +286,11 @@ where
                 }
             }
         }
+        let tip_height = block_infos[0].0.height;
         block_infos.reverse();
         const WRITE_CHUNK_SIZE: usize = 20_000;
         tracing::trace!(%block_hash, "storing ancestor headers/info");
+        sync_progress.start_writing(tip_height, block_infos.len() as u32);
         for chunk in block_infos.chunks(WRITE_CHUNK_SIZE) {
             // Writing all headers during IBD can starve archive readers.
             task::block_in_place(|| {
@@ -292,6 +307,7 @@ where
                 rwtxn.commit().map_err(RwTxnError::from)?;
                 Ok::<_, ResponseError>(())
             })?;
+            sync_progress.wrote_headers(chunk.len() as u32);
             // A shutdown can stop the task here, between two commits.
             task::yield_now().await;
         }
@@ -1070,7 +1086,7 @@ mod test {
     }
 
     #[test]
-    fn sync_progress_reports_headers_then_idle() -> anyhow::Result<()> {
+    fn sync_progress_reports_headers_writing_then_idle() -> anyhow::Result<()> {
         const TIP_HEIGHT: u32 = 20_099;
         let (_temp_dir, env) = temp_env()?;
         let archive = Archive::new(&env)?;
@@ -1078,8 +1094,9 @@ mod test {
         let sync_progress = &mock.sync_progress;
         let mut client = ValidatorClient::new(mock.clone());
         let tip = main_header_info(TIP_HEIGHT).block_hash;
+        let mut written = Vec::new();
         let runtime = tokio::runtime::Runtime::new()?;
-        let available = runtime.block_on(
+        let available = runtime.block_on(poll_walk(
             MainchainTask::<MockValidator>::request_ancestor_infos(
                 &env,
                 &archive,
@@ -1087,24 +1104,35 @@ mod test {
                 sync_progress,
                 tip,
             ),
-        )?;
-        assert!(available);
+            || {
+                written.push(sync_progress.get());
+                Ok(ControlFlow::Continue(()))
+            },
+        ))?;
+        assert_eq!(available.transpose()?, Some(true));
         let headers = |done| MainchainSyncProgress {
             phase: MainchainSyncPhase::Headers,
             done,
             total: TIP_HEIGHT,
             tip_height: TIP_HEIGHT,
         };
+        let writing = |done| MainchainSyncProgress {
+            phase: MainchainSyncPhase::Writing,
+            done,
+            total: TIP_HEIGHT + 1,
+            tip_height: TIP_HEIGHT,
+        };
         assert_eq!(
             *mock.progress.lock(),
             [MainchainSyncProgress::default(), headers(20_000)]
         );
+        assert_eq!(written, [writing(20_000), writing(TIP_HEIGHT + 1)]);
         assert_eq!(
             serde_json::to_value(sync_progress.get())?,
             serde_json::json!({
-                "phase": "headers",
-                "done": TIP_HEIGHT,
-                "total": TIP_HEIGHT,
+                "phase": "writing",
+                "done": TIP_HEIGHT + 1,
+                "total": TIP_HEIGHT + 1,
                 "tip_height": TIP_HEIGHT,
             })
         );
