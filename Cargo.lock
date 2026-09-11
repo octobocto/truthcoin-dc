@@ -7639,6 +7639,7 @@ dependencies = [
  "mimalloc",
  "parking_lot",
  "poll-promise",
+ "reserve-port",
  "serde",
  "shlex",
  "strum 0.27.2",

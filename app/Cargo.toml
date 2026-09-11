@@ -55,6 +55,9 @@ uuid = { workspace = true, features = ["v4"] }
 version = "0.9.1"
 features = ["AES256-GCM", "ECIES-MAC", "HMAC-SHA256", "x25519"]
 
+[dev-dependencies]
+reserve-port = "2.0.1"
+
 [features]
 default = ["zmq"]
 zmq = ["truthcoin_dc/zmq"]
