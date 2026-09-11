@@ -174,6 +174,21 @@ const fn seed_node_addrs(network: Network) -> &'static [SocketAddr] {
     }
 }
 
+/// Add every seed address the network names that the database does not hold.
+/// A datadir made before a seed existed would otherwise never learn it.
+fn ensure_seed_peers(
+    known_peers: &DatabaseUnique<SerdeBincode<SocketAddr>, Unit>,
+    rwtxn: &mut RwTxn,
+    network: Network,
+) -> Result<(), DbError> {
+    for seed_node_addr in seed_node_addrs(network) {
+        if known_peers.try_get(rwtxn, seed_node_addr)?.is_none() {
+            known_peers.put(rwtxn, seed_node_addr, &())?;
+        }
+    }
+    Ok(())
+}
+
 const ALPHANET_SEED: (&str, u16) =
     ("seed.alpha.ecash.eu.com", 4000 + THIS_SIDECHAIN as u16);
 
@@ -348,15 +363,9 @@ impl Net {
         let known_peers =
             match DatabaseUnique::open(env, &rwtxn, "known_peers")? {
                 Some(known_peers) => known_peers,
-                None => {
-                    let known_peers =
-                        DatabaseUnique::create(env, &mut rwtxn, "known_peers")?;
-                    for seed_node_addr in seed_node_addrs(network) {
-                        known_peers.put(&mut rwtxn, seed_node_addr, &())?;
-                    }
-                    known_peers
-                }
+                None => DatabaseUnique::create(env, &mut rwtxn, "known_peers")?,
             };
+        let () = ensure_seed_peers(&known_peers, &mut rwtxn, network)?;
         if network == Network::Alphanet {
             for addr in resolve_seed_addrs(ALPHANET_SEED)? {
                 known_peers.put(&mut rwtxn, &addr, &())?;

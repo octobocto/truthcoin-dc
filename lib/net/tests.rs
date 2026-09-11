@@ -1,5 +1,7 @@
 use std::{net::SocketAddr, time::Duration};
 
+use heed::types::{SerdeBincode, Unit};
+
 use super::{ALPHANET_SEED, Archive, DatabaseUnique, Net, Network, State};
 
 pub(crate) fn set_crypto_provider() {
@@ -31,6 +33,38 @@ fn seed_resolution_keeps_both_address_families() {
         "127.0.0.1:4013".parse().unwrap(),
     ];
     assert_eq!(super::resolve_seed_addrs(addrs.as_slice()).unwrap(), addrs);
+}
+
+/// Every seed reaches a peer table that already exists, and a second call
+/// writes the same set.
+#[test]
+fn seeds_reach_an_existing_database() -> anyhow::Result<()> {
+    let dir = tempfile::tempdir()?;
+    let mut options = heed::EnvOpenOptions::new().read_txn_without_tls();
+    options.map_size(16 * 1024 * 1024).max_dbs(2);
+    let env = unsafe { sneed::Env::open(&options, dir.path()) }?;
+    let network = Network::Signet;
+    let known_peers = {
+        let mut rwtxn = env.write_txn()?;
+        let known_peers: DatabaseUnique<SerdeBincode<SocketAddr>, Unit> =
+            DatabaseUnique::create(&env, &mut rwtxn, "known_peers")?;
+        super::ensure_seed_peers(&known_peers, &mut rwtxn, network)?;
+        super::ensure_seed_peers(&known_peers, &mut rwtxn, network)?;
+        rwtxn.commit()?;
+        known_peers
+    };
+    let rotxn = env.read_txn()?;
+    for seed_node_addr in super::seed_node_addrs(network) {
+        anyhow::ensure!(
+            known_peers.try_get(&rotxn, seed_node_addr)?.is_some(),
+            "the seed {seed_node_addr} never reached the database"
+        );
+    }
+    assert_eq!(
+        known_peers.len(&rotxn)?,
+        super::seed_node_addrs(network).len() as u64
+    );
+    Ok(())
 }
 
 #[test]
