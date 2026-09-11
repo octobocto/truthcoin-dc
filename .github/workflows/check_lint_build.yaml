@@ -17,7 +17,7 @@ jobs:
     name: Check, Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -28,7 +28,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.5.1
+        uses: Swatinem/rust-cache@v2.9.1
         with:
           shared-key: x86_64-unknown-linux-gnu
 
@@ -73,11 +73,11 @@ jobs:
         with:
           toolchain: nightly
           target: x86_64-pc-windows-gnu
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: "recursive"
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.1
         with:
           shared-key: x86_64-unknown-linux-gnu
       - name: Build the matched enforcer
@@ -129,7 +129,7 @@ jobs:
       contents: write
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
@@ -140,7 +140,7 @@ jobs:
           target: ${{ matrix.name }}
 
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.5.1
+        uses: Swatinem/rust-cache@v2.9.1
         with:
           key: ${{ matrix.name }}
 
@@ -182,7 +182,7 @@ jobs:
           zip "../${TRUTHCOIN_ARCHIVE_FILENAME}" "truthcoin${{ matrix.binary-suffix }}" "truthcoin-cli${{ matrix.binary-suffix }}"
 
       - name: 'Upload Artifacts (truthcoin)'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.TRUTHCOIN_APP_FILENAME }}
           if-no-files-found: error
@@ -208,7 +208,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/') && vars.ENABLE_RELEASE_MIRROR == 'true'
     steps:
       - name: Download release assets
-        uses: robinraju/release-downloader@v1.9
+        uses: robinraju/release-downloader@v1.13
         with:
           tag: ${{ github.ref_name }}
 
