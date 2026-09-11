@@ -317,7 +317,7 @@ impl MarketsDatabase {
                     tracing::error!(
                         "Failed to remove market {} from decision index {}: {}",
                         market.id,
-                        hex::encode(decision_id.as_bytes()),
+                        const_hex::encode(decision_id.as_bytes()),
                         e
                     );
                     Error::DatabaseError(format!(
@@ -332,7 +332,7 @@ impl MarketsDatabase {
                         tracing::error!(
                             "Failed to add market {} to decision index {}: {}",
                             market.id,
-                            hex::encode(decision_id.as_bytes()),
+                            const_hex::encode(decision_id.as_bytes()),
                             e
                         );
                         Error::DatabaseError(format!(

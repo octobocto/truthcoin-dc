@@ -159,7 +159,7 @@ impl VotingSystem {
 
                 tracing::info!(
                     "Decision {} no votes — using default {:.4}",
-                    hex::encode(decision_id.as_bytes()),
+                    const_hex::encode(decision_id.as_bytes()),
                     default_value
                 );
 
@@ -283,7 +283,7 @@ impl VotingSystem {
                     tracing::info!(
                         "Decision {} has unanimous abstention \
                          — using default {:.4}",
-                        hex::encode(decision_id.as_bytes()),
+                        const_hex::encode(decision_id.as_bytes()),
                         default_value
                     );
                     default_value
@@ -328,7 +328,7 @@ impl VotingSystem {
 
                 tracing::info!(
                     "Decision {} had no votes — using default {:.4}",
-                    hex::encode(decision_id.as_bytes()),
+                    const_hex::encode(decision_id.as_bytes()),
                     default_value
                 );
 

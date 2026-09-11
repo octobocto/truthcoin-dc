@@ -452,7 +452,7 @@ where
 
         tracing::debug!(
             "Updated mempool shares for market {}: outcome {} increased by {} shares",
-            hex::encode(market_id),
+            const_hex::encode(market_id),
             outcome_index,
             shares_to_buy
         );
@@ -521,7 +521,7 @@ where
 
         tracing::debug!(
             "Updated mempool shares for market {}: outcome {} decreased by {} shares (sell)",
-            hex::encode(market_id),
+            const_hex::encode(market_id),
             outcome_index,
             shares_to_sell
         );

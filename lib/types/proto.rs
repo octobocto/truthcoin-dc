@@ -198,7 +198,7 @@ pub mod common {
             let Self { hex } = self;
             let hex =
                 hex.ok_or_else(|| super::Error::missing_field::<Self>("hex"))?;
-            hex::decode(&hex).map_err(|_err| {
+            const_hex::decode(&hex).map_err(|_err| {
                 super::Error::invalid_field_value::<Message>(field_name, &hex)
             })
         }
@@ -214,7 +214,7 @@ pub mod common {
             let Self { hex } = self;
             let hex =
                 hex.ok_or_else(|| super::Error::missing_field::<Self>("hex"))?;
-            let bytes = hex::decode(&hex).map_err(|_err| {
+            let bytes = const_hex::decode(&hex).map_err(|_err| {
                 super::Error::invalid_field_value::<Message>(field_name, &hex)
             })?;
             T::try_from_slice(&bytes).map_err(|_err| {
@@ -224,7 +224,7 @@ pub mod common {
 
         pub fn encode<T>(value: &T) -> Self
         where
-            T: hex::ToHex,
+            T: const_hex::ToHexExt,
         {
             let hex = value.encode_hex();
             Self { hex: Some(hex) }
@@ -244,7 +244,7 @@ pub mod common {
             let hex = hex
                 .as_ref()
                 .ok_or_else(|| super::Error::missing_field::<Self>("hex"))?;
-            let mut bytes = hex::decode(hex).map_err(|_| {
+            let mut bytes = const_hex::decode(hex).map_err(|_| {
                 super::Error::invalid_field_value::<Message>(field_name, hex)
             })?;
             bytes.reverse();
@@ -274,7 +274,7 @@ pub mod common {
             let mut bytes = bitcoin::consensus::encode::serialize(value);
             bytes.reverse();
             Self {
-                hex: Some(hex::encode(bytes)),
+                hex: Some(const_hex::encode(bytes)),
             }
         }
     }
@@ -474,7 +474,8 @@ pub mod mainchain {
                         Ok(address_str) => address_str,
                         Err(_) => {
                             tracing::warn!(
-                                address_bytes = hex::encode(address_bytes),
+                                address_bytes =
+                                    const_hex::encode(address_bytes),
                                 "Ignoring invalid deposit address"
                             );
                             break 'address Address::ALL_ZEROS;

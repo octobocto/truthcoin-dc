@@ -129,7 +129,7 @@ impl std::fmt::Display for OutPoint {
                     f,
                     "{} {} {}",
                     type_str,
-                    hex::encode(market_id),
+                    const_hex::encode(market_id),
                     block_height
                 )
             }

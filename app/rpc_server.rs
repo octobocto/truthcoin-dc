@@ -174,7 +174,7 @@ pub(crate) fn allocate_decision_slots(
 fn parse_market_id(
     market_id: &str,
 ) -> RpcResult<truthcoin_dc::state::MarketId> {
-    let market_id_bytes = hex::decode(market_id)
+    let market_id_bytes = const_hex::decode(market_id)
         .map_err(|_| custom_err_msg("Invalid market ID hex format"))?;
 
     if market_id_bytes.len() != 6 {
@@ -234,8 +234,10 @@ impl RpcServerImpl {
                 None => truthcoin_dc_app_rpc_api::DecisionContentInfo::Empty,
                 Some(decision) => {
                     truthcoin_dc_app_rpc_api::DecisionContentInfo::Decision({
-                        let id = hex::encode(decision.id());
-                        let mm = hex::encode(decision.market_maker_pubkey_hash);
+                        let id = const_hex::encode(decision.id());
+                        let mm = const_hex::encode(
+                            decision.market_maker_pubkey_hash,
+                        );
                         truthcoin_dc_app_rpc_api::DecisionInfo {
                             id,
                             market_maker_pubkey_hash: mm,
@@ -840,7 +842,7 @@ impl RpcServer for RpcServerImpl {
         let memo = match memo {
             None => None,
             Some(memo) => {
-                let hex = hex::decode(memo).map_err(custom_err)?;
+                let hex = const_hex::decode(memo).map_err(custom_err)?;
                 Some(hex)
             }
         };
@@ -869,7 +871,7 @@ impl RpcServer for RpcServerImpl {
         let memo = match memo {
             None => None,
             Some(memo) => {
-                let hex = hex::decode(memo).map_err(custom_err)?;
+                let hex = const_hex::decode(memo).map_err(custom_err)?;
                 Some(hex)
             }
         };
@@ -1061,7 +1063,7 @@ impl RpcServer for RpcServerImpl {
         encryption_pubkey: EncryptionPubKey,
         ciphertext: String,
     ) -> RpcResult<String> {
-        let ciphertext_bytes = hex::decode(&ciphertext).map_err(|e| {
+        let ciphertext_bytes = const_hex::decode(&ciphertext).map_err(|e| {
             ErrorObject::owned(
                 -32602,
                 "Invalid hex string",
@@ -1075,7 +1077,7 @@ impl RpcServer for RpcServerImpl {
             .decrypt_msg(&encryption_pubkey, &ciphertext_bytes)
             .map_err(custom_err)?;
 
-        Ok(hex::encode(decrypted_bytes))
+        Ok(const_hex::encode(decrypted_bytes))
     }
 
     async fn encrypt_msg(
@@ -1247,8 +1249,8 @@ impl RpcServer for RpcServerImpl {
 
                 let did = entry.decision_id;
                 let decision = entry.decision.map(|d| {
-                    let id = hex::encode(d.id());
-                    let mm = hex::encode(d.market_maker_pubkey_hash);
+                    let id = const_hex::encode(d.id());
+                    let mm = const_hex::encode(d.market_maker_pubkey_hash);
                     truthcoin_dc_app_rpc_api::DecisionInfo {
                         id,
                         market_maker_pubkey_hash: mm,
@@ -1745,7 +1747,7 @@ impl RpcServer for RpcServerImpl {
         let market_summaries = markets_with_states
             .into_iter()
             .map(|(market, computed_state)| {
-                let market_id_hex = hex::encode(market.id.as_bytes());
+                let market_id_hex = const_hex::encode(market.id.as_bytes());
 
                 truthcoin_dc_app_rpc_api::MarketSummary {
                     market_id: market_id_hex,
@@ -2665,7 +2667,7 @@ impl RpcServer for RpcServerImpl {
     }
 
     async fn push_tx(&self, tx_hex: String) -> RpcResult<Txid> {
-        let bytes = hex::decode(&tx_hex)
+        let bytes = const_hex::decode(&tx_hex)
             .map_err(|e| custom_err_msg(format!("invalid hex: {e}")))?;
         let tx: AuthorizedTransaction =
             bincode::deserialize(&bytes).map_err(|e| {
@@ -2690,8 +2692,8 @@ impl RpcServer for RpcServerImpl {
             .map_err(custom_err)?
             .ok_or_else(|| custom_err_msg("Market not found"))?;
 
-        let prev_block_bytes =
-            hex::decode(&request.prev_block_hash).map_err(|e| {
+        let prev_block_bytes = const_hex::decode(&request.prev_block_hash)
+            .map_err(|e| {
                 custom_err_msg(format!("invalid prev_block_hash hex: {e}"))
             })?;
         if prev_block_bytes.len() != 32 {
@@ -2737,7 +2739,7 @@ impl RpcServer for RpcServerImpl {
             ))
         })?;
         Ok(CreateTradeResponse {
-            signed_tx_hex: hex::encode(bytes),
+            signed_tx_hex: const_hex::encode(bytes),
             txid: txid.to_string(),
         })
     }

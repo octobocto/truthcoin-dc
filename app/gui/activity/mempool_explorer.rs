@@ -131,7 +131,7 @@ impl MempoolExplorer {
                                             } else {
                                                 "market"
                                             },
-                                            hex::encode(market_id),
+                                            const_hex::encode(market_id),
                                             *block_height,
                                         ),
                                         OutPoint::Payout { hash, vout } => {

@@ -247,7 +247,7 @@ impl MemPool {
                 && existing_txid != txid
             {
                 return Err(Error::DecisionAlreadyClaimedInMempool(
-                    hex::encode(decision_id),
+                    const_hex::encode(decision_id),
                 ));
             }
         }
@@ -385,7 +385,7 @@ impl MemPool {
                 && zombie_txid != confirmed_txid
             {
                 tracing::info!(
-                    decision_id = %hex::encode(decision_id),
+                    decision_id = %const_hex::encode(decision_id),
                     %zombie_txid,
                     %confirmed_txid,
                     "evicting zombie decision-claim conflict"

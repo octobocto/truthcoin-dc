@@ -21,7 +21,7 @@ either = "1.13.0"
 fallible-iterator = { workspace = true }
 fraction = { workspace = true, features = ["with-serde-support"] }
 futures = { workspace = true }
-hex = { workspace = true }
+const-hex = { workspace = true }
 http = { workspace = true }
 human-size = "0.4.3"
 itertools = { workspace = true }
