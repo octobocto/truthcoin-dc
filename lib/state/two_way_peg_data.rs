@@ -1078,6 +1078,7 @@ mod tests {
     use hashlink::LinkedHashMap;
 
     use crate::{
+        archive::Archive,
         state::{
             State, UtxoManager as _, WithdrawalBundleInfo,
             rollback::{HeightStamped, RollBack},
@@ -1101,7 +1102,8 @@ mod tests {
         let env_path = dir.path().join("data.mdb");
         std::fs::create_dir_all(&env_path).unwrap();
         let mut opts = heed::EnvOpenOptions::new();
-        opts.map_size(64 * 1024 * 1024).max_dbs(State::NUM_DBS);
+        opts.map_size(64 * 1024 * 1024)
+            .max_dbs(State::NUM_DBS + Archive::NUM_DBS);
         let env = unsafe { sneed::Env::open(&opts, &env_path) }.unwrap();
         (env, dir)
     }
@@ -1336,5 +1338,105 @@ mod tests {
             "unexpected overweight P2WPKH bundle: {weight} wu"
         );
         Ok(())
+    }
+
+    // connecting a deposit then disconnecting it on a reorg must round-trip
+    #[test]
+    fn deposit_reorg_round_trips() {
+        use crate::types::{Body, Header, proto::mainchain::Deposit};
+
+        let (env, _dir) = temp_env();
+        let archive = Archive::new(&env).unwrap();
+        let state = State::new(&env, None).unwrap();
+
+        let empty_body = Body {
+            coinbase: Vec::new(),
+            transactions: Vec::new(),
+            authorizations: Vec::new(),
+            actor_proofs: Vec::new(),
+        };
+        let merkle_root = Body::compute_merkle_root(
+            &empty_body.coinbase,
+            &empty_body.transactions,
+        );
+        let main0 = bitcoin::BlockHash::from_byte_array([10; 32]);
+        let main1 = bitcoin::BlockHash::from_byte_array([11; 32]);
+
+        let genesis = Header {
+            merkle_root,
+            prev_side_hash: None,
+            prev_main_hash: main0,
+        };
+        {
+            let mut rwtxn = env.write_txn().unwrap();
+            state
+                .apply_block(&archive, &mut rwtxn, &genesis, &empty_body, 0)
+                .unwrap();
+            state
+                .connect_two_way_peg_data(&mut rwtxn, &TwoWayPegData::default())
+                .unwrap();
+            rwtxn.commit().unwrap();
+        }
+
+        let block1 = Header {
+            merkle_root,
+            prev_side_hash: Some(genesis.hash()),
+            prev_main_hash: main1,
+        };
+        let deposit_outpoint = bitcoin::OutPoint {
+            txid: bitcoin::Txid::from_byte_array([2; 32]),
+            vout: 0,
+        };
+        let deposit_key =
+            OutPointKey::from_outpoint(&OutPoint::Deposit(deposit_outpoint));
+        let deposit_twpd = {
+            let mut block_info = LinkedHashMap::new();
+            block_info.insert(
+                main1,
+                BlockInfo {
+                    bmm_commitment: None,
+                    events: vec![BlockEvent::Deposit(Deposit {
+                        tx_index: 0,
+                        outpoint: deposit_outpoint,
+                        output: FilledOutput {
+                            address: Address::ALL_ZEROS,
+                            content: FilledOutputContent::Bitcoin(
+                                BitcoinOutputContent(
+                                    bitcoin::Amount::from_sat(1000),
+                                ),
+                            ),
+                            memo: Vec::new(),
+                        },
+                    })],
+                },
+            );
+            TwoWayPegData { block_info }
+        };
+        {
+            let mut rwtxn = env.write_txn().unwrap();
+            state
+                .apply_block(&archive, &mut rwtxn, &block1, &empty_body, 0)
+                .unwrap();
+            state
+                .connect_two_way_peg_data(&mut rwtxn, &deposit_twpd)
+                .unwrap();
+            assert!(
+                state.utxos.try_get(&rwtxn, &deposit_key).unwrap().is_some()
+            );
+            assert!(state.deposit_blocks.last(&rwtxn).unwrap().is_some());
+            rwtxn.commit().unwrap();
+        }
+
+        {
+            let mut rwtxn = env.write_txn().unwrap();
+            state
+                .disconnect_two_way_peg_data(&mut rwtxn, &deposit_twpd)
+                .unwrap();
+            assert!(
+                state.utxos.try_get(&rwtxn, &deposit_key).unwrap().is_none()
+            );
+            assert!(state.deposit_blocks.last(&rwtxn).unwrap().is_none());
+            rwtxn.commit().unwrap();
+        }
     }
 }
