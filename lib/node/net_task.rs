@@ -78,8 +78,6 @@ pub enum Error {
     ReceiveMainchainTaskResponse,
     #[error("Receive reorg result cancelled (oneshot)")]
     ReceiveReorgResultOneshot(#[source] oneshot::Canceled),
-    #[error("Send mainchain task request failed")]
-    SendMainchainTaskRequest,
     #[error("Send new tip ready failed")]
     SendNewTipReady(#[source] TrySendError<NewTipReadyMessage>),
     #[error("Send reorg result error (oneshot)")]
@@ -1232,15 +1230,18 @@ impl NetTask {
                         );
                         continue;
                     }
+                    if self.ctxt.mainchain_task.request(request).is_err() {
+                        tracing::warn!(
+                            ?request,
+                            %peer,
+                            "the mainchain task took no request"
+                        );
+                        continue;
+                    }
                     mainchain_task_request_sources
                         .entry(request)
                         .or_default()
                         .insert((peer, peer_state_id));
-                    let () = self
-                        .ctxt
-                        .mainchain_task
-                        .request(request)
-                        .map_err(|_| Error::SendMainchainTaskRequest)?;
                 }
                 MailboxItem::MainchainTaskEvent(event) => {
                     let () = Self::handle_mainchain_task_event(
