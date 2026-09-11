@@ -1480,6 +1480,7 @@ mod test {
         let node = Node::new(
             (Ipv4Addr::LOCALHOST, 0).into(),
             temp_dir.path(),
+            None,
             Network::Regtest,
             ValidatorClient::new(channel),
             None,

@@ -69,6 +69,7 @@ fn ipv4_node_connects_with_both_seed_families() {
         let (net, _events) = Net::new(
             &env,
             archive,
+            None,
             Network::Regtest,
             state,
             "0.0.0.0:0".parse().unwrap(),
@@ -104,6 +105,7 @@ async fn rejected_duplicate_has_no_peer_close_event() -> anyhow::Result<()> {
     let (net, info_rx) = Net::new(
         &env,
         archive,
+        None,
         Network::Regtest,
         state,
         "127.0.0.1:0".parse()?,
@@ -114,7 +116,7 @@ async fn rejected_duplicate_has_no_peer_close_event() -> anyhow::Result<()> {
     let context = super::PeerConnectionCtxt {
         env,
         archive: net.archive.clone(),
-        network: net.network,
+        magic_bytes: net.magic_bytes,
         state: net.state.clone(),
     };
     let (duplicate, duplicate_info) =
