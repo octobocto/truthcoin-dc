@@ -68,9 +68,9 @@ impl From<&Response> for Request {
 #[derive(Debug, Error)]
 enum Error {
     #[error("Send response error")]
-    SendResponse(Response),
+    SendResponse(Box<Response>),
     #[error("Send response error (oneshot)")]
-    SendResponseOneshot(Response),
+    SendResponseOneshot(Box<Response>),
 }
 
 /// Progress of the sync with the mainchain, shared with the RPC server
@@ -215,12 +215,15 @@ where
                     let response =
                         Response::AncestorInfos(main_block_hash, res);
                     if let Some(response_tx) = response_tx {
-                        response_tx
-                            .send(response)
-                            .map_err(Error::SendResponseOneshot)?;
+                        response_tx.send(response).map_err(|resp| {
+                            Error::SendResponseOneshot(Box::new(resp))
+                        })?;
                     } else {
                         self.response_tx.unbounded_send(response).map_err(
-                            |err| Error::SendResponse(err.into_inner()),
+                            |err| {
+                                let resp = err.into_inner();
+                                Error::SendResponse(Box::new(resp))
+                            },
                         )?;
                     }
                 }
