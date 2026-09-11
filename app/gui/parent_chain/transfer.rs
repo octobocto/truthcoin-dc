@@ -91,7 +91,7 @@ impl Deposit {
                     self.error = None;
                     self.promise =
                         Some(poll_promise::Promise::spawn_async(async move {
-                            app.deposit_async(address, amount, fee)
+                            app.deposit(address, amount, fee)
                                 .await
                                 .map_err(|e| format!("{e:#}"))
                         }));
@@ -194,7 +194,7 @@ impl Withdrawal {
                     let app = app.unwrap().clone();
                     self.generate_promise =
                         Some(poll_promise::Promise::spawn_async(async move {
-                            app.get_new_main_address_async()
+                            app.get_new_main_address()
                                 .await
                                 .map_err(|e| format!("{e:#}"))
                         }));
