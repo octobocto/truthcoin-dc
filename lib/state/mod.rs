@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroU32;
 
 use fallible_iterator::FallibleIterator;
-use futures::Stream;
 use heed::types::SerdeBincode;
 use serde::{Deserialize, Serialize};
 use sneed::{DatabaseUnique, RoDatabaseUnique, RoTxn, RwTxn, UnitKey};
@@ -954,7 +953,7 @@ impl State {
 }
 
 impl Watchable<()> for State {
-    type WatchStream = impl Stream<Item = ()>;
+    type WatchStream = tokio_stream::wrappers::WatchStream<()>;
     fn watch(&self) -> Self::WatchStream {
         tokio_stream::wrappers::WatchStream::new(self.tip.watch().clone())
     }
