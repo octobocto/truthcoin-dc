@@ -25,6 +25,7 @@ use truthcoin_dc::{
     state::period_to_name,
     types::{
         Address, Authorization, AuthorizedTransaction, Block, BlockHash,
+        BlockIndex, BlockIndexDeposit, BlockIndexSpend, BlockIndexTx,
         EncryptionPubKey, FilledOutputContent, MainchainSyncProgress,
         PointedOutput, Transaction, Txid, VerifyingKey, WithdrawalBundle,
     },
@@ -568,6 +569,52 @@ impl RpcServer for RpcServerImpl {
     async fn get_block(&self, block_hash: BlockHash) -> RpcResult<Block> {
         let block = self.node().get_block(block_hash).map_err(custom_err)?;
         Ok(block)
+    }
+
+    async fn get_block_hash(
+        &self,
+        height: u32,
+    ) -> RpcResult<Option<BlockHash>> {
+        self.node().try_get_block_hash(height).map_err(custom_err)
+    }
+
+    async fn get_block_index(
+        &self,
+        block_hash: BlockHash,
+    ) -> RpcResult<BlockIndex> {
+        let body = self.node().get_body(block_hash).map_err(custom_err)?;
+        let txs = body
+            .transactions
+            .iter()
+            .map(|tx| {
+                let raw = borsh::to_vec(tx).map_err(custom_err)?;
+                Ok(BlockIndexTx {
+                    txid: tx.txid(),
+                    size: raw.len() as u64,
+                    raw: const_hex::encode(raw),
+                })
+            })
+            .collect::<RpcResult<_>>()?;
+        let events = self
+            .node()
+            .get_block_index_events(block_hash)
+            .map_err(custom_err)?;
+        Ok(BlockIndex {
+            txs,
+            deposits: events
+                .deposits
+                .into_iter()
+                .map(|(outpoint, output)| BlockIndexDeposit {
+                    outpoint,
+                    output,
+                })
+                .collect(),
+            bundle_spends: events
+                .bundle_spends
+                .into_iter()
+                .map(|(outpoint, m6id)| BlockIndexSpend { outpoint, m6id })
+                .collect(),
+        })
     }
 
     async fn get_block_template(&self) -> RpcResult<GetBlockTemplateResponse> {

@@ -12,11 +12,13 @@ use truthcoin_dc::{
     state::decisions::DecisionType,
     types::{
         Address, AssetId, Authorization, Authorized, BitcoinOutputContent,
-        Block, BlockHash, Body, EncryptionPubKey, FilledOutputContent, Header,
-        InPoint, M6id, MainchainSyncPhase, MainchainSyncProgress, MerkleRoot,
-        OutPoint, Output, OutputContent, PointedOutput, SpentOutput,
-        Transaction, TxData, TxIn, Txid, VerifyingKey, WithdrawalBundle,
-        WithdrawalOutputContent, schema as truthcoin_schema,
+        Block, BlockHash, BlockIndex, BlockIndexDeposit, BlockIndexSpend,
+        BlockIndexTx, Body, EncryptionPubKey, FilledOutput,
+        FilledOutputContent, Header, InPoint, M6id, MainchainSyncPhase,
+        MainchainSyncProgress, MerkleRoot, OutPoint, Output, OutputContent,
+        PointedOutput, SpentOutput, Transaction, TxData, TxIn, Txid,
+        VerifyingKey, WithdrawalBundle, WithdrawalOutputContent,
+        schema as truthcoin_schema,
     },
     wallet::Balance,
 };

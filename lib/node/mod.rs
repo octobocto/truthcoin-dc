@@ -9,7 +9,7 @@ use std::{
 use bitcoin::amount::CheckedSum as _;
 use fallible_iterator::{FallibleIterator, IteratorExt};
 use heed::EnvFlags;
-use sneed::{DbError, Env, EnvError, RwTxnError, env};
+use sneed::{DbError, Env, EnvError, RoTxn, RwTxnError, env};
 use tokio::sync::Mutex;
 use tonic::transport::Channel;
 
@@ -23,9 +23,9 @@ use crate::{
     state::{self, State, markets::MarketId},
     types::{
         Address, AmountOverflowError, AmountUnderflowError, Authorized,
-        AuthorizedTransaction, Block, BlockHash, BmmResult, Body, FilledOutput,
-        FilledTransaction, GetBitcoinValue, Header, InPoint,
-        MainchainSyncProgress, Network, OutPoint, OutPointKey, Output,
+        AuthorizedTransaction, Block, BlockHash, BlockIndexEvents, BmmResult,
+        Body, FilledOutput, FilledTransaction, GetBitcoinValue, Header,
+        InPoint, MainchainSyncProgress, Network, OutPoint, OutPointKey, Output,
         SpentOutput, Tip, Transaction, TxData, TxIn, Txid, WithdrawalBundle,
         proto::{self, mainchain},
     },
@@ -77,6 +77,8 @@ pub enum Error {
     NetTask(#[source] Box<net_task::Error>),
     #[error("No CUSF mainchain wallet client")]
     NoCusfMainchainWalletClient,
+    #[error("block {block_hash} is not in the current chain")]
+    NotInCurrentChain { block_hash: BlockHash },
     #[error("peer info stream closed")]
     PeerInfoRxClosed,
     #[error("Receive mainchain task response cancelled")]
@@ -732,20 +734,44 @@ where
         height: u32,
     ) -> Result<Option<BlockHash>, Error> {
         let rotxn = self.env.read_txn()?;
-        let Some(tip) = self.state.try_get_tip(&rotxn)? else {
+        self.try_get_block_hash_read(&rotxn, height)
+    }
+
+    fn try_get_block_hash_read(
+        &self,
+        rotxn: &RoTxn,
+        height: u32,
+    ) -> Result<Option<BlockHash>, Error> {
+        let Some(tip) = self.state.try_get_tip(rotxn)? else {
             return Ok(None);
         };
-        let Some(tip_height) = self.state.try_get_height(&rotxn)? else {
+        let Some(tip_height) = self.state.try_get_height(rotxn)? else {
             return Ok(None);
         };
         if tip_height >= height {
             self.archive
-                .ancestors(&rotxn, tip)
+                .ancestors(rotxn, tip)
                 .nth((tip_height - height) as usize)
                 .map_err(Error::from)
         } else {
             Ok(None)
         }
+    }
+
+    /// Get the coin movements that the block applied outside its body
+    pub fn get_block_index_events(
+        &self,
+        block_hash: BlockHash,
+    ) -> Result<BlockIndexEvents, Error> {
+        let rotxn = self.env.read_txn()?;
+        let height = self.archive.get_height(&rotxn, block_hash)?;
+        // The events are keyed by height, so a block off the current chain
+        // would read another block's events.
+        if self.try_get_block_hash_read(&rotxn, height)? != Some(block_hash) {
+            return Err(Error::NotInCurrentChain { block_hash });
+        }
+        let events = self.state.get_block_index_events(&rotxn, height)?;
+        Ok(events)
     }
 
     pub fn try_get_body(

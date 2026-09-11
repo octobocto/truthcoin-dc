@@ -9,10 +9,11 @@ use sneed::{DatabaseUnique, RoDatabaseUnique, RoTxn, RwTxn, UnitKey};
 use crate::{
     types::{
         Address, AmountOverflowError, Authorized, AuthorizedTransaction,
-        BlockHash, Body, FilledOutput, FilledTransaction, GetBitcoinValue as _,
-        Header, InPoint, M6id, MerkleRoot, OutPoint, OutPointKey, SpentOutput,
-        Transaction, VERSION, Version, WithdrawalBundle,
-        WithdrawalBundleStatus, proto::mainchain::TwoWayPegData,
+        BlockHash, BlockIndexEvents, Body, FilledOutput, FilledTransaction,
+        GetBitcoinValue as _, Header, InPoint, M6id, MerkleRoot, OutPoint,
+        OutPointKey, SpentOutput, Transaction, VERSION, Version,
+        WithdrawalBundle, WithdrawalBundleStatus,
+        proto::mainchain::TwoWayPegData,
     },
     util::Watchable,
     validation::DecisionValidationInterface,
@@ -100,6 +101,10 @@ pub struct State {
     latest_failed_withdrawal_bundle:
         DatabaseUnique<UnitKey, SerdeBincode<RollBack<HeightStamped<M6id>>>>,
     withdrawal_bundles: WithdrawalBundlesDb,
+    /// Coin movements that no block body carries, keyed by the height that
+    /// applied them
+    block_index_events:
+        DatabaseUnique<SerdeBincode<u32>, SerdeBincode<BlockIndexEvents>>,
     deposit_blocks: DatabaseUnique<
         SerdeBincode<u32>,
         SerdeBincode<(bitcoin::BlockHash, u32)>,
@@ -210,7 +215,7 @@ impl DecisionValidationInterface for State {
 }
 
 impl State {
-    const BASE_DBS: u32 = 13;
+    const BASE_DBS: u32 = 14;
     const UNDO_DBS: u32 = 6;
 
     pub const NUM_DBS: u32 = reputation::ReputationDbs::NUM_DBS
@@ -267,6 +272,8 @@ impl State {
         )?;
         let withdrawal_bundles =
             DatabaseUnique::create(env, &mut rwtxn, "withdrawal_bundles")?;
+        let block_index_events =
+            DatabaseUnique::create(env, &mut rwtxn, "block_index_events")?;
         let deposit_blocks =
             DatabaseUnique::create(env, &mut rwtxn, "deposit_blocks")?;
         let withdrawal_bundle_event_blocks = DatabaseUnique::create(
@@ -309,6 +316,7 @@ impl State {
             pending_withdrawal_bundle,
             latest_failed_withdrawal_bundle,
             withdrawal_bundles,
+            block_index_events,
             withdrawal_bundle_event_blocks,
             deposit_blocks,
             _version: version,
@@ -359,6 +367,19 @@ impl State {
         SerdeBincode<(bitcoin::BlockHash, u32)>,
     > {
         &self.withdrawal_bundle_event_blocks
+    }
+
+    /// Coin movements that the block at this height applied outside its body.
+    pub fn get_block_index_events(
+        &self,
+        rotxn: &RoTxn,
+        height: u32,
+    ) -> Result<BlockIndexEvents, Error> {
+        let events = self
+            .block_index_events
+            .try_get(rotxn, &height)?
+            .unwrap_or_default();
+        Ok(events)
     }
 
     pub fn try_get_tip(

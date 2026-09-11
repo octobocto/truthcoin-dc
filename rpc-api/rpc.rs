@@ -1,36 +1,37 @@
 use super::{
     Address, AssetId, Authorization, Authorized, Balance, BallotItem,
-    BitcoinOutputContent, Block, BlockHash, Body,
-    CalculateInitialLiquidityRequest, ClaimedDecisionInfo, ConsensusResults,
-    CreateTradeRequest, CreateTradeResponse, DecisionClaimItem,
-    DecisionClaimRequest, DecisionClaimResponse, DecisionDetails,
-    DecisionFilter, DecisionListItem, DecisionListingFeeInfo,
-    DecisionPeriodStatus, DecisionState, DecisionSummary, DecisionType,
-    DimensionInput, Dst, EncryptionPubKey, FilledOutputContent,
-    GetBlockTemplateResponse, Header, InPoint, InitialLiquidityCalculation,
-    M6id, MainchainSyncPhase, MainchainSyncProgress, MarketAmplifyBetaRequest,
-    MarketBuyRequest, MarketBuyResponse, MarketCreateRequest,
-    MarketCreateResponse, MarketData, MarketOutcome, MarketSellRequest,
-    MarketSellResponse, MarketSummary, MempoolTx, MerkleRoot, OutPoint, Output,
-    OutputContent, ParticipationStats, Peer, PeerConnectionStatus,
-    PeriodPricingSummary, PeriodStats, PointedOutput, PointedSpentOutput,
-    RpcResult, ScoreChange, SharePosition, Signature, SocketAddr, SpentOutput,
-    Transaction, TxData, TxIn, TxInfo, Txid, UserHoldings, VerifyingKey,
-    VoteFilter, VoteInfo, VoterInfo, VoterInfoFull, VotingPeriodFull,
-    WithdrawalBundle, WithdrawalOutputContent, open_api, rpc, schema,
-    truthcoin_schema,
+    BitcoinOutputContent, Block, BlockHash, BlockIndex, BlockIndexDeposit,
+    BlockIndexSpend, BlockIndexTx, Body, CalculateInitialLiquidityRequest,
+    ClaimedDecisionInfo, ConsensusResults, CreateTradeRequest,
+    CreateTradeResponse, DecisionClaimItem, DecisionClaimRequest,
+    DecisionClaimResponse, DecisionDetails, DecisionFilter, DecisionListItem,
+    DecisionListingFeeInfo, DecisionPeriodStatus, DecisionState,
+    DecisionSummary, DecisionType, DimensionInput, Dst, EncryptionPubKey,
+    FilledOutput, FilledOutputContent, GetBlockTemplateResponse, Header,
+    InPoint, InitialLiquidityCalculation, M6id, MainchainSyncPhase,
+    MainchainSyncProgress, MarketAmplifyBetaRequest, MarketBuyRequest,
+    MarketBuyResponse, MarketCreateRequest, MarketCreateResponse, MarketData,
+    MarketOutcome, MarketSellRequest, MarketSellResponse, MarketSummary,
+    MempoolTx, MerkleRoot, OutPoint, Output, OutputContent, ParticipationStats,
+    Peer, PeerConnectionStatus, PeriodPricingSummary, PeriodStats,
+    PointedOutput, PointedSpentOutput, RpcResult, ScoreChange, SharePosition,
+    Signature, SocketAddr, SpentOutput, Transaction, TxData, TxIn, TxInfo,
+    Txid, UserHoldings, VerifyingKey, VoteFilter, VoteInfo, VoterInfo,
+    VoterInfoFull, VotingPeriodFull, WithdrawalBundle, WithdrawalOutputContent,
+    open_api, rpc, schema, truthcoin_schema,
 };
 
 #[open_api(ref_schemas[
     truthcoin_schema::BitcoinAddr, truthcoin_schema::BitcoinBlockHash,
     truthcoin_schema::BitcoinTransaction, truthcoin_schema::BitcoinOutPoint,
     truthcoin_schema::SocketAddr, Address, AssetId, Authorization,
-    BitcoinOutputContent, Block, BlockHash, Body,
+    BitcoinOutputContent, Block, BlockHash, BlockIndexDeposit, BlockIndexSpend,
+    BlockIndexTx, Body,
     CalculateInitialLiquidityRequest, ClaimedDecisionInfo, DecisionClaimItem,
     DecisionClaimRequest, DecisionClaimResponse, DimensionInput,
     MarketCreateRequest, MarketCreateResponse, PeriodPricingSummary,
     ConsensusResults, DecisionSummary,
-    EncryptionPubKey, FilledOutputContent, Header, InitialLiquidityCalculation,
+    EncryptionPubKey, FilledOutput, FilledOutputContent, Header, InitialLiquidityCalculation,
     MainchainSyncPhase, MarketBuyRequest, MarketBuyResponse, MarketData,
     MarketOutcome, MarketSellRequest, MarketSellResponse, MarketSummary,
     InPoint, M6id, MerkleRoot, OutPoint, Output, OutputContent,
@@ -117,6 +118,24 @@ pub trait Rpc {
     #[open_api_method(output_schema(ToSchema))]
     #[method(name = "get_block")]
     async fn get_block(&self, block_hash: BlockHash) -> RpcResult<Block>;
+
+    /// Get the block hash at the specified height in the current chain,
+    /// if it exists
+    #[open_api_method(output_schema(
+        PartialSchema = "schema::Optional<BlockHash>"
+    ))]
+    #[method(name = "get_block_hash")]
+    async fn get_block_hash(&self, height: u32)
+    -> RpcResult<Option<BlockHash>>;
+
+    /// Get the transaction ids, sizes and encodings of a block, with the
+    /// mainchain deposits and withdrawal bundle spends it applied
+    #[open_api_method(output_schema(ToSchema))]
+    #[method(name = "get_block_index")]
+    async fn get_block_index(
+        &self,
+        block_hash: BlockHash,
+    ) -> RpcResult<BlockIndex>;
 
     /// Assemble a block to blind merge mine, without requesting BMM for it.
     /// The caller requests BMM for `critical_hash` itself, then passes the

@@ -10,10 +10,11 @@ use crate::{
         rollback::{HeightStamped, RollBack},
     },
     types::{
-        AggregatedWithdrawal, AmountOverflowError, FilledOutput,
-        FilledOutputContent, InPoint, M6id, OutPoint, OutPointKey, SpentOutput,
-        WithdrawalBundle, WithdrawalBundleEvent, WithdrawalBundleEventStatus,
-        WithdrawalBundleStatus, WithdrawalOutputContent,
+        AggregatedWithdrawal, AmountOverflowError, BlockIndexEvents,
+        FilledOutput, FilledOutputContent, InPoint, M6id, OutPoint,
+        OutPointKey, SpentOutput, WithdrawalBundle, WithdrawalBundleEvent,
+        WithdrawalBundleEventStatus, WithdrawalBundleStatus,
+        WithdrawalOutputContent,
         proto::mainchain::{BlockEvent, TwoWayPegData},
     },
 };
@@ -123,6 +124,7 @@ fn connect_withdrawal_bundle_submitted(
     state: &State,
     rwtxn: &mut RwTxn,
     block_height: u32,
+    index_events: &mut BlockIndexEvents,
     event_block_hash: &bitcoin::BlockHash,
     m6id: M6id,
 ) -> Result<(), Error> {
@@ -165,6 +167,7 @@ fn connect_withdrawal_bundle_submitted(
                 inpoint: InPoint::Withdrawal { m6id },
             };
             state.stxos.put(rwtxn, &outpoint_key, &spent_output)?;
+            index_events.bundle_spends.push((*outpoint, m6id));
         }
         if bundle_status.latest().value != WithdrawalBundleStatus::Pending {
             return Err(Error::DatabaseError(format!(
@@ -474,6 +477,7 @@ fn connect_withdrawal_bundle_event(
     state: &State,
     rwtxn: &mut RwTxn,
     block_height: u32,
+    index_events: &mut BlockIndexEvents,
     event_block_hash: &bitcoin::BlockHash,
     event: &WithdrawalBundleEvent,
 ) -> Result<(), Error> {
@@ -483,6 +487,7 @@ fn connect_withdrawal_bundle_event(
                 state,
                 rwtxn,
                 block_height,
+                index_events,
                 event_block_hash,
                 event.m6id,
             )
@@ -507,10 +512,12 @@ fn connect_withdrawal_bundle_event(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn connect_2wpd_event(
     state: &State,
     rwtxn: &mut RwTxn,
     block_height: u32,
+    index_events: &mut BlockIndexEvents,
     latest_deposit_block_hash: &mut Option<bitcoin::BlockHash>,
     latest_withdrawal_bundle_event_block_hash: &mut Option<bitcoin::BlockHash>,
     event_block_hash: bitcoin::BlockHash,
@@ -521,6 +528,7 @@ fn connect_2wpd_event(
             let outpoint = OutPoint::Deposit(deposit.outpoint);
             let output = deposit.output.clone();
             state.insert_utxo(rwtxn, &outpoint, &output)?;
+            index_events.deposits.push((outpoint, output));
             *latest_deposit_block_hash = Some(event_block_hash);
         }
         BlockEvent::WithdrawalBundle(withdrawal_bundle_event) => {
@@ -528,6 +536,7 @@ fn connect_2wpd_event(
                 state,
                 rwtxn,
                 block_height,
+                index_events,
                 &event_block_hash,
                 withdrawal_bundle_event,
             )?;
@@ -543,6 +552,7 @@ pub fn connect(
     two_way_peg_data: &TwoWayPegData,
 ) -> Result<(), Error> {
     let block_height = state.try_get_height(rwtxn)?.ok_or(Error::NoTip)?;
+    let mut index_events = BlockIndexEvents::default();
     let mut latest_deposit_block_hash = None;
     let mut latest_withdrawal_bundle_event_block_hash = None;
     for (event_block_hash, event_block_info) in &two_way_peg_data.block_info {
@@ -551,12 +561,20 @@ pub fn connect(
                 state,
                 rwtxn,
                 block_height,
+                &mut index_events,
                 &mut latest_deposit_block_hash,
                 &mut latest_withdrawal_bundle_event_block_hash,
                 *event_block_hash,
                 event,
             )?;
         }
+    }
+    // Record what this block moved outside its body. An address index cannot
+    // see a deposit or a bundle spend any other way.
+    if !index_events.is_empty() {
+        state
+            .block_index_events
+            .put(rwtxn, &block_height, &index_events)?;
     }
     if let Some(latest_deposit_block_hash) = latest_deposit_block_hash {
         let deposit_block_seq_idx = state
@@ -960,6 +978,7 @@ pub fn disconnect(
     two_way_peg_data: &TwoWayPegData,
 ) -> Result<(), Error> {
     let block_height = state.try_get_height(rwtxn)?.ok_or(Error::NoTip)?;
+    state.block_index_events.delete(rwtxn, &block_height)?;
     let mut latest_deposit_block_hash = None;
     let mut latest_withdrawal_bundle_event_block_hash = None;
     for (event_block_hash, event_block_info) in
@@ -1097,10 +1116,11 @@ mod tests {
             },
         },
         types::{
-            Address, BitcoinOutputContent, FilledOutput, FilledOutputContent,
-            Hash, InPoint, M6id, OutPoint, OutPointKey, Txid, WithdrawalBundle,
-            WithdrawalBundleEvent, WithdrawalBundleEventStatus,
-            WithdrawalBundleStatus, WithdrawalOutputContent,
+            Address, BitcoinOutputContent, BlockIndexEvents, FilledOutput,
+            FilledOutputContent, Hash, InPoint, M6id, OutPoint, OutPointKey,
+            Txid, WithdrawalBundle, WithdrawalBundleEvent,
+            WithdrawalBundleEventStatus, WithdrawalBundleStatus,
+            WithdrawalOutputContent,
             proto::mainchain::{BlockEvent, BlockInfo, TwoWayPegData},
         },
     };
@@ -1499,6 +1519,66 @@ mod tests {
 
         anyhow::ensure!(state.utxos.len(&rwtxn)? == 0);
         anyhow::ensure!(state.deposit_blocks.len(&rwtxn)? == 0);
+        Ok(())
+    }
+
+    #[test]
+    fn block_index_events_round_trip() -> anyhow::Result<()> {
+        let (env, _dir) = temp_env();
+        let state = State::new(&env, None)?;
+        let deposit_outpoint = |byte: u8| {
+            OutPoint::Deposit(bitcoin::OutPoint {
+                txid: bitcoin::Txid::from_byte_array([byte; 32]),
+                vout: 0,
+            })
+        };
+        let events = BlockIndexEvents {
+            deposits: vec![(
+                deposit_outpoint(1),
+                FilledOutput {
+                    address: Address::ALL_ZEROS,
+                    content: FilledOutputContent::Bitcoin(
+                        BitcoinOutputContent(bitcoin::Amount::from_sat(5000)),
+                    ),
+                    memo: Vec::new(),
+                },
+            )],
+            bundle_spends: vec![(
+                deposit_outpoint(2),
+                M6id(bitcoin::Txid::from_byte_array([3; 32])),
+            )],
+        };
+        {
+            let mut rwtxn = env.write_txn()?;
+            state.block_index_events.put(&mut rwtxn, &7, &events)?;
+            rwtxn.commit()?;
+        }
+        {
+            let rotxn = env.read_txn()?;
+            anyhow::ensure!(state.get_block_index_events(&rotxn, 7)? == events);
+            // A height that moved nothing outside its body reads as empty.
+            anyhow::ensure!(
+                state.get_block_index_events(&rotxn, 8)?.is_empty()
+            );
+        }
+
+        // A disconnect drops the events, so a reorg leaves nothing behind for
+        // the block that takes the height.
+        {
+            let mut rwtxn = env.write_txn()?;
+            state.block_index_events.delete(&mut rwtxn, &7)?;
+            rwtxn.commit()?;
+        }
+        let rotxn = env.read_txn()?;
+        anyhow::ensure!(state.get_block_index_events(&rotxn, 7)?.is_empty());
+
+        // A height that moved nothing writes no row, so deleting it again is
+        // still safe.
+        {
+            let mut rwtxn = env.write_txn()?;
+            state.block_index_events.delete(&mut rwtxn, &8)?;
+            rwtxn.commit()?;
+        }
         Ok(())
     }
 }
