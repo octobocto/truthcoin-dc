@@ -1310,10 +1310,6 @@ where
         header: &Header,
         body: &Body,
     ) -> Result<bool, Error> {
-        let Some(cusf_mainchain_wallet) = self.cusf_mainchain_wallet.as_ref()
-        else {
-            return Err(Error::NoCusfMainchainWalletClient);
-        };
         let block_hash = header.hash();
         if let Some(parent) = header.prev_side_hash
             && self.try_get_header(parent)?.is_none()
@@ -1412,14 +1408,18 @@ where
                 );
             }
         }
-        if let Some((bundle, _bundle_h)) = bundle {
+        if let Some((bundle, _)) = bundle
+            && let Some(cusf_mainchain_wallet) =
+                self.cusf_mainchain_wallet.as_ref()
+        {
             let m6id = bundle.compute_m6id();
-            let mut cusf_mainchain_wallet_lock =
-                cusf_mainchain_wallet.lock().await;
-            let () = cusf_mainchain_wallet_lock
-                .broadcast_withdrawal_bundle(bundle.tx())
-                .await?;
-            drop(cusf_mainchain_wallet_lock);
+            {
+                let mut cusf_mainchain_wallet_lock =
+                    cusf_mainchain_wallet.lock().await;
+                let () = cusf_mainchain_wallet_lock
+                    .broadcast_withdrawal_bundle(bundle.tx())
+                    .await?;
+            }
             tracing::trace!(%m6id, "Broadcast withdrawal bundle");
         }
         Ok(true)
