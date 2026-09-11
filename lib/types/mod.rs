@@ -16,6 +16,7 @@ pub use crate::authorization::Authorization;
 mod address;
 pub mod hashes;
 pub mod keys;
+pub mod net;
 pub mod proto;
 pub mod schema;
 mod transaction;

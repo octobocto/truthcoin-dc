@@ -22,6 +22,7 @@ const-hex = "1.19.1"
 fallible-iterator = "0.3.0"
 fraction = "0.14.0"
 futures = { version = "0.3.30", default-features = false }
+hickory-resolver = { version = "0.26", default-features = false }
 http = "1.2.0"
 itertools = "0.14.0"
 jsonrpsee = { version = "0.26.0", features = ["tracing"] }

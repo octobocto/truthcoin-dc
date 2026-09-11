@@ -19,7 +19,7 @@ use crate::{
     archive::{self, Archive},
     math::trading,
     mempool::{self, MemPool},
-    net::{self, Net, Peer},
+    net::{self, DialSeedsHandle, Net, Peer},
     state::{self, State, markets::MarketId},
     types::{
         Address, AmountOverflowError, AmountUnderflowError, Authorized,
@@ -27,6 +27,7 @@ use crate::{
         Body, FilledOutput, FilledTransaction, GetBitcoinValue, Header,
         InPoint, MainchainSyncProgress, Network, OutPoint, OutPointKey, Output,
         SpentOutput, Tip, Transaction, TxData, TxIn, Txid, WithdrawalBundle,
+        net::SeedAddress,
         proto::{self, mainchain},
     },
     util::Watchable,
@@ -123,6 +124,7 @@ pub struct Node<MainchainTransport = Channel> {
     cusf_mainchain: mainchain::ValidatorClient<MainchainTransport>,
     cusf_mainchain_wallet:
         Option<Arc<Mutex<mainchain::WalletClient<MainchainTransport>>>>,
+    _dial_seeds: Arc<DialSeedsHandle>,
     env: sneed::Env<heed::WithoutTls>,
     mainchain_task: MainchainTaskHandle,
     mempool: MemPool,
@@ -143,6 +145,7 @@ where
         datadir: &Path,
         magic_bytes_override: Option<crate::net::peer_message::MagicBytes>,
         network: Network,
+        add_peers: HashSet<SeedAddress>,
         cusf_mainchain: mainchain::ValidatorClient<MainchainTransport>,
         cusf_mainchain_wallet: Option<
             mainchain::WalletClient<MainchainTransport>,
@@ -212,13 +215,15 @@ where
                 archive.clone(),
                 cusf_mainchain.clone(),
             );
-        let (net, peer_info_rx) = Net::new(
+        let (net, peer_info_rx, dial_seeds) = Net::new(
+            runtime.handle(),
             &env,
             archive.clone(),
             magic_bytes_override,
             network,
             state.clone(),
             bind_addr,
+            add_peers,
         )?;
         let cusf_mainchain_wallet =
             cusf_mainchain_wallet.map(|wallet| Arc::new(Mutex::new(wallet)));
@@ -239,6 +244,7 @@ where
             archive,
             cusf_mainchain,
             cusf_mainchain_wallet,
+            _dial_seeds: Arc::new(dial_seeds),
             env,
             mainchain_task,
             mempool,
@@ -1291,7 +1297,7 @@ where
 
     pub fn connect_peer(&self, addr: SocketAddr) -> Result<(), Error> {
         self.net
-            .connect_peer(self.env.clone(), addr)
+            .connect_peer(self.env.clone(), addr.into())
             .map_err(Error::from)
     }
 

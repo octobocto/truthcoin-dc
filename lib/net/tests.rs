@@ -1,8 +1,16 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    collections::HashSet,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    time::Duration,
+};
 
 use heed::types::{SerdeBincode, Unit};
 
-use super::{ALPHANET_SEED, Archive, DatabaseUnique, Net, Network, State};
+use super::{
+    ALPHANET_SEED_NODE_ADDRS, Archive, DatabaseUnique, Net, Network,
+    PeerInfoRx, State,
+};
+use crate::types::net::{ResolvedSeedAddress, SeedAddress};
 
 pub(crate) fn set_crypto_provider() {
     static INIT: std::sync::Once = std::sync::Once::new();
@@ -15,24 +23,42 @@ pub(crate) fn set_crypto_provider() {
 
 #[test]
 fn alphanet_names_the_seed_port() {
-    assert_eq!(ALPHANET_SEED, ("seed.alpha.ecash.eu.com", 4013));
+    assert_eq!(
+        ALPHANET_SEED_NODE_ADDRS,
+        [SeedAddress {
+            host: url::Host::Domain("seed.alpha.ecash.eu.com"),
+            port: 4013,
+        }]
+    );
 }
 
-#[test]
-fn seed_resolution_keeps_the_port() {
-    let addrs = super::resolve_seed_addrs(("localhost", 4013)).unwrap();
-    assert!(!addrs.is_empty());
-    assert!(addrs.iter().all(|addr| addr.port() == 4013));
-    assert!(addrs.iter().all(|addr| addr.ip().is_loopback()));
+#[tokio::test]
+async fn seed_resolution_keeps_the_port() -> anyhow::Result<()> {
+    let dns_resolver = hickory_resolver::Resolver::builder_tokio()?.build()?;
+    let seed_addr: SeedAddress = "localhost:4013".parse()?;
+    let resolved =
+        super::resolve_seed_address(&dns_resolver, seed_addr).await?;
+    assert_eq!(resolved.port(), 4013);
+    assert!(resolved.ip_addrs().all(|addr| addr.is_loopback()));
+    Ok(())
 }
 
 #[test]
 fn seed_resolution_keeps_both_address_families() {
-    let addrs: [SocketAddr; 2] = [
-        "[::1]:4013".parse().unwrap(),
-        "127.0.0.1:4013".parse().unwrap(),
-    ];
-    assert_eq!(super::resolve_seed_addrs(addrs.as_slice()).unwrap(), addrs);
+    let v4 = IpAddr::V4(Ipv4Addr::LOCALHOST);
+    let v6 = IpAddr::V6(Ipv6Addr::LOCALHOST);
+    let resolved = ResolvedSeedAddress::Domain {
+        domain: "localhost".to_owned(),
+        port: 4013,
+        addrs: nonempty::NonEmpty {
+            head: v4,
+            tail: vec![v6],
+        },
+    };
+    assert_eq!(resolved.ip_addrs().collect::<Vec<_>>(), [v6, v4]);
+    let (first, rest) = resolved.pop_first_ip_addr();
+    assert_eq!(first, v6);
+    assert_eq!(rest.map(|rest| rest.first_ip_addr()), Some(v4));
 }
 
 /// Every seed reaches a peer table that already exists, and a second call
@@ -54,16 +80,17 @@ fn seeds_reach_an_existing_database() -> anyhow::Result<()> {
         known_peers
     };
     let rotxn = env.read_txn()?;
-    for seed_node_addr in super::seed_node_addrs(network) {
+    let seed_socket_addrs: Vec<SocketAddr> = super::seed_node_addrs(network)
+        .iter()
+        .filter_map(SeedAddress::socket_addr)
+        .collect();
+    for seed_node_addr in &seed_socket_addrs {
         anyhow::ensure!(
             known_peers.try_get(&rotxn, seed_node_addr)?.is_some(),
             "the seed {seed_node_addr} never reached the database"
         );
     }
-    assert_eq!(
-        known_peers.len(&rotxn)?,
-        super::seed_node_addrs(network).len() as u64
-    );
+    assert_eq!(known_peers.len(&rotxn)?, seed_socket_addrs.len() as u64);
     Ok(())
 }
 
@@ -100,13 +127,15 @@ fn ipv4_node_connects_with_both_seed_families() {
             }
             txn.commit().unwrap();
         }
-        let (net, _events) = Net::new(
+        let (net, _events, _dial_seeds) = Net::new(
+            &tokio::runtime::Handle::current(),
             &env,
             archive,
             None,
             Network::Regtest,
             state,
             "0.0.0.0:0".parse().unwrap(),
+            HashSet::new(),
         )
         .unwrap();
         let connection = tokio::time::timeout(Duration::from_secs(3), async {
@@ -136,21 +165,24 @@ async fn rejected_duplicate_has_no_peer_close_event() -> anyhow::Result<()> {
     let env = unsafe { sneed::Env::open(&options, dir.path()) }?;
     let state = State::new(&env, None)?;
     let archive = Archive::new(&env)?;
-    let (net, info_rx) = Net::new(
+    let (net, info_rx, _dial_seeds) = Net::new(
+        &tokio::runtime::Handle::current(),
         &env,
         archive,
         None,
         Network::Regtest,
         state,
         "127.0.0.1:0".parse()?,
+        HashSet::new(),
     )?;
     let (remote, _) = super::make_server_endpoint("127.0.0.1:0".parse()?)?;
     let addr = remote.local_addr()?;
-    net.connect_peer(env.clone(), addr)?;
+    net.connect_peer(env.clone(), addr.into())?;
     let context = super::PeerConnectionCtxt {
         env,
         archive: net.archive.clone(),
         magic_bytes: net.magic_bytes,
+        resolved_address: addr.into(),
         state: net.state.clone(),
     };
     let (duplicate, duplicate_info) =
@@ -169,5 +201,64 @@ async fn rejected_duplicate_has_no_peer_close_event() -> anyhow::Result<()> {
     )
     .await?;
     assert_eq!(events.iter().filter(|(_, info)| info.is_none()).count(), 1);
+    Ok(())
+}
+
+fn temp_net() -> anyhow::Result<(
+    tempfile::TempDir,
+    sneed::Env<heed::WithoutTls>,
+    Net,
+    PeerInfoRx,
+)> {
+    set_crypto_provider();
+    let dir = tempfile::tempdir()?;
+    let mut options = heed::EnvOpenOptions::new().read_txn_without_tls();
+    options
+        .map_size(16 * 1024 * 1024)
+        .max_dbs(State::NUM_DBS + Archive::NUM_DBS + Net::NUM_DBS);
+    let env = unsafe { sneed::Env::open(&options, dir.path()) }?;
+    let state = State::new(&env, None)?;
+    let archive = Archive::new(&env)?;
+    let (net, info_rx, _dial_seeds) = Net::new(
+        &tokio::runtime::Handle::current(),
+        &env,
+        archive,
+        None,
+        Network::Regtest,
+        state,
+        "127.0.0.1:0".parse()?,
+        HashSet::new(),
+    )?;
+    Ok((dir, env, net, info_rx))
+}
+
+#[tokio::test]
+async fn connect_peer_keeps_a_static_ipv4_address() -> anyhow::Result<()> {
+    let (_dir, env, net, _info_rx) = temp_net()?;
+    let (remote, _) =
+        super::make_server_endpoint((Ipv4Addr::LOCALHOST, 0).into())?;
+    let addr = remote.local_addr()?;
+
+    net.connect_peer(env, addr.into())?;
+
+    let peers = net.get_active_peers();
+    assert_eq!(peers.len(), 1);
+    assert_eq!(peers[0].address, addr);
+    Ok(())
+}
+
+#[tokio::test]
+async fn connect_peer_returns_other_quinn_errors() -> anyhow::Result<()> {
+    let (_dir, env, net, _info_rx) = temp_net()?;
+    net.server.close(0_u32.into(), b"test complete");
+    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, 4004));
+
+    let error = net.connect_peer(env, addr.into()).unwrap_err();
+
+    assert!(matches!(
+        error,
+        super::Error::Connect(quinn::ConnectError::EndpointStopping)
+    ));
+    assert!(net.get_active_peers().is_empty());
     Ok(())
 }
