@@ -22,7 +22,10 @@ use tokio::{
 
 use crate::{
     archive::{self, Archive},
-    types::proto::{self, mainchain},
+    types::{
+        MainchainSyncPhase, MainchainSyncProgress,
+        proto::{self, mainchain},
+    },
 };
 
 /// Request data from the mainchain node
@@ -70,10 +73,35 @@ enum Error {
     SendResponseOneshot(Response),
 }
 
+/// Progress of the sync with the mainchain, shared with the RPC server
+#[derive(Clone, Default)]
+struct SyncProgress(Arc<parking_lot::Mutex<MainchainSyncProgress>>);
+
+impl SyncProgress {
+    fn get(&self) -> MainchainSyncProgress {
+        *self.0.lock()
+    }
+
+    /// `next_height` is the height of the next header to fetch
+    fn fetched_headers(&self, tip_height: u32, next_height: Option<u32>) {
+        *self.0.lock() = MainchainSyncProgress {
+            phase: MainchainSyncPhase::Headers,
+            done: tip_height - next_height.unwrap_or(0),
+            total: tip_height,
+            tip_height,
+        };
+    }
+
+    fn set_idle(&self) {
+        *self.0.lock() = MainchainSyncProgress::default();
+    }
+}
+
 struct MainchainTask<Transport = tonic::transport::Channel> {
     env: sneed::Env,
     archive: Archive,
     mainchain: proto::mainchain::ValidatorClient<Transport>,
+    sync_progress: SyncProgress,
     // receive a request, and optional oneshot sender to send the result to
     // instead of sending on `response_tx`
     request_rx: UnboundedReceiver<(Request, Option<oneshot::Sender<Response>>)>,
@@ -91,6 +119,7 @@ where
         env: &sneed::Env,
         archive: &Archive,
         cusf_mainchain: &mut proto::mainchain::ValidatorClient<Transport>,
+        sync_progress: &SyncProgress,
         block_hash: bitcoin::BlockHash,
     ) -> Result<bool, ResponseError> {
         if block_hash == bitcoin::BlockHash::all_zeros() {
@@ -136,6 +165,8 @@ where
                 current_height = current_header.height.checked_sub(1);
             }
             block_infos.extend(block_infos_resp);
+            sync_progress
+                .fetched_headers(block_infos[0].0.height, current_height);
             if current_block_hash == bitcoin::BlockHash::all_zeros() {
                 break;
             } else {
@@ -176,9 +207,11 @@ where
                         &self.env,
                         &self.archive,
                         &mut self.mainchain,
+                        &self.sync_progress,
                         main_block_hash,
                     )
                     .await;
+                    self.sync_progress.set_idle();
                     let response =
                         Response::AncestorInfos(main_block_hash, res);
                     if let Some(response_tx) = response_tx {
@@ -202,6 +235,7 @@ where
 #[derive(Clone)]
 pub(super) struct MainchainTaskHandle {
     task: Arc<JoinHandle<()>>,
+    sync_progress: SyncProgress,
     // send a request, and optional oneshot sender to receive the result on the
     // corresponding oneshot receiver
     request_tx:
@@ -221,10 +255,12 @@ impl MainchainTaskHandle {
     {
         let (request_tx, request_rx) = mpsc::unbounded();
         let (response_tx, response_rx) = mpsc::unbounded();
+        let sync_progress = SyncProgress::default();
         let task = MainchainTask {
             env,
             archive,
             mainchain,
+            sync_progress: sync_progress.clone(),
             request_rx,
             response_tx,
         };
@@ -236,9 +272,14 @@ impl MainchainTaskHandle {
         });
         let task_handle = MainchainTaskHandle {
             task: Arc::new(task),
+            sync_progress,
             request_tx,
         };
         (task_handle, response_rx)
+    }
+
+    pub fn sync_progress(&self) -> MainchainSyncProgress {
+        self.sync_progress.get()
     }
 
     /// Send a request
@@ -293,12 +334,15 @@ mod test {
     use parking_lot::Mutex;
     use tonic::codegen::{BoxFuture, Service, http};
 
-    use super::MainchainTask;
+    use super::{MainchainTask, SyncProgress};
     use crate::{
         archive::Archive,
-        types::proto::{
-            common::{ConsensusHex, ReverseHex},
-            mainchain::{self, ValidatorClient, generated},
+        types::{
+            MainchainSyncPhase, MainchainSyncProgress,
+            proto::{
+                common::{ConsensusHex, ReverseHex},
+                mainchain::{self, ValidatorClient, generated},
+            },
         },
     };
 
@@ -331,10 +375,12 @@ mod test {
     }
 
     /// Serves `GetBlockInfo` for the chain of [`main_header_info`], and
-    /// records the `max_ancestors` of each request
+    /// records the `max_ancestors` and the sync progress of each request
     #[derive(Clone, Default)]
     struct MockValidator {
         max_ancestors: Arc<Mutex<Vec<u32>>>,
+        progress: Arc<Mutex<Vec<MainchainSyncProgress>>>,
+        sync_progress: SyncProgress,
     }
 
     impl tonic::server::UnaryService<generated::GetBlockInfoRequest>
@@ -361,6 +407,7 @@ mod test {
                 .expect("block_hash decodes");
             let max_ancestors = request.max_ancestors.expect("max_ancestors");
             self.max_ancestors.lock().push(max_ancestors);
+            self.progress.lock().push(self.sync_progress.get());
             let height = u32::from_le_bytes(
                 block_hash.as_byte_array()[1..5]
                     .try_into()
@@ -437,11 +484,65 @@ mod test {
                 &env,
                 &archive,
                 &mut client,
+                &mock.sync_progress,
                 tip,
             ),
         )?;
         assert!(available);
         assert_eq!(*mock.max_ancestors.lock(), [19_999]);
+        Ok(())
+    }
+
+    #[test]
+    fn sync_progress_reports_headers_then_idle() -> anyhow::Result<()> {
+        const TIP_HEIGHT: u32 = 20_099;
+        let (_temp_dir, env) = temp_env()?;
+        let archive = Archive::new(&env)?;
+        let mock = MockValidator::default();
+        let sync_progress = &mock.sync_progress;
+        let mut client = ValidatorClient::new(mock.clone());
+        let tip = main_header_info(TIP_HEIGHT).block_hash;
+        let runtime = tokio::runtime::Runtime::new()?;
+        let available = runtime.block_on(
+            MainchainTask::<MockValidator>::request_ancestor_infos(
+                &env,
+                &archive,
+                &mut client,
+                sync_progress,
+                tip,
+            ),
+        )?;
+        assert!(available);
+        let headers = |done| MainchainSyncProgress {
+            phase: MainchainSyncPhase::Headers,
+            done,
+            total: TIP_HEIGHT,
+            tip_height: TIP_HEIGHT,
+        };
+        assert_eq!(
+            *mock.progress.lock(),
+            [MainchainSyncProgress::default(), headers(20_000)]
+        );
+        assert_eq!(
+            serde_json::to_value(sync_progress.get())?,
+            serde_json::json!({
+                "phase": "headers",
+                "done": TIP_HEIGHT,
+                "total": TIP_HEIGHT,
+                "tip_height": TIP_HEIGHT,
+            })
+        );
+
+        sync_progress.set_idle();
+        assert_eq!(
+            serde_json::to_value(sync_progress.get())?,
+            serde_json::json!({
+                "phase": "idle",
+                "done": 0,
+                "total": 0,
+                "tip_height": 0,
+            })
+        );
         Ok(())
     }
 }
