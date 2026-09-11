@@ -276,6 +276,15 @@ impl ComponentRefs for openapi::OpenApi {
 
 #[test]
 fn check_schema() -> anyhow::Result<()> {
+    // The schema nests deep enough to overflow the default test thread stack.
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(check_schema_inner)?
+        .join()
+        .map_err(|_| anyhow::anyhow!("the schema check panicked"))?
+}
+
+fn check_schema_inner() -> anyhow::Result<()> {
     let schema: openapi::OpenApi =
         <crate::RpcDoc as utoipa::OpenApi>::openapi();
     let component_ref_locations = BTreeSet::<&str>::from_iter(

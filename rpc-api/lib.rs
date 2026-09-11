@@ -9,15 +9,15 @@ use serde::{Deserialize, Serialize};
 use truthcoin_dc::{
     authorization::{Dst, Signature},
     net::{Peer, PeerConnectionStatus},
-    state::decisions::DecisionType,
+    state::{decisions::DecisionType, markets::MarketId},
     types::{
-        Address, AssetId, Authorization, Authorized, BitcoinOutputContent,
-        Block, BlockHash, BlockIndex, BlockIndexDeposit, BlockIndexSpend,
-        BlockIndexTx, Body, EncryptionPubKey, FilledOutput,
-        FilledOutputContent, Header, InPoint, M6id, MainchainSyncPhase,
-        MainchainSyncProgress, MerkleRoot, OutPoint, Output, OutputContent,
-        PointedOutput, SpentOutput, Transaction, TxData, TxIn, Txid,
-        VerifyingKey, WithdrawalBundle, WithdrawalOutputContent,
+        Address, Authorization, Authorized, BitcoinOutputContent, Block,
+        BlockHash, BlockIndex, BlockIndexDeposit, BlockIndexSpend,
+        BlockIndexTx, Body, ClaimDecisionPayload, DecisionClaimEntry,
+        EncryptionPubKey, FilledOutput, FilledOutputContent, Header, InPoint,
+        M6id, MainchainSyncPhase, MainchainSyncProgress, MerkleRoot, OutPoint,
+        Output, OutputContent, PointedOutput, SpentOutput, Transaction, TxData,
+        TxIn, Txid, VerifyingKey, WithdrawalBundle, WithdrawalOutputContent,
         schema as truthcoin_schema,
     },
     wallet::{Balance, TransferDests},
@@ -25,6 +25,8 @@ use truthcoin_dc::{
 use utoipa::ToSchema;
 
 mod schema;
+#[cfg(test)]
+mod test;
 
 /// A spent output, and the outpoint that created it
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
