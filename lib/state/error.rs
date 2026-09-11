@@ -129,6 +129,8 @@ pub enum Error {
     NoStxo { outpoint: OutPoint },
     #[error("utxo {outpoint} doesn't exist")]
     NoUtxo { outpoint: OutPoint },
+    #[error("withdrawal output {outpoint} cannot be spent by a transaction")]
+    SpendWithdrawalOutput { outpoint: OutPoint },
     #[error("Withdrawal bundle event block doesn't exist")]
     NoWithdrawalBundleEventBlock,
 
