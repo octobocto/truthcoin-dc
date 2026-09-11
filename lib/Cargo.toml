@@ -55,12 +55,12 @@ sha2 = "0.10"
 sha3 = "0.10"
 serde_json = { workspace = true }
 serde_with = { workspace = true, features = ["alloc", "macros"] }
-smallvec = { version = "1.13.2", features = ["write"] }
+smallvec = { version = "1.13.2", features = ["const_generics", "write"] }
 sneed = { version = "0.0.22", features = ["observe"] }
 strum = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 tiny-bip39 = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 tokio-stream = { version = "0.1.15", features = ["sync"] }
 tokio-util = { workspace = true, features = ["rt"] }
 tonic = { workspace = true }

@@ -6,16 +6,23 @@ use sneed::{
     env, rwtxn,
 };
 
-use crate::types::{BlockHash, Txid, Version};
+use crate::{
+    archive::side_tips::error as side_tips,
+    types::{BlockHash, Txid, Version},
+};
 
 #[allow(clippy::duplicated_attributes)]
 #[derive(thiserror::Error, transitive::Transitive, Debug)]
 #[transitive(from(db::error::Delete, DbError))]
+#[transitive(from(db::error::Get, DbError))]
+#[transitive(from(db::error::Last, DbError))]
 #[transitive(from(db::error::Put, DbError))]
 #[transitive(from(db::error::TryGet, DbError))]
 #[transitive(from(env::error::CreateDb, EnvError))]
 #[transitive(from(env::error::WriteTxn, EnvError))]
 #[transitive(from(rwtxn::error::Commit, RwTxnError))]
+#[transitive(from(side_tips::DisconnectMainchainTip, side_tips::Error))]
+#[transitive(from(side_tips::DisconnectSidechainTip, side_tips::Error))]
 pub enum Error {
     #[error(transparent)]
     Db(#[from] DbError),
@@ -64,4 +71,6 @@ pub enum Error {
     NoMainHeight(bitcoin::BlockHash),
     #[error("no tx with txid {0}")]
     NoTx(Txid),
+    #[error(transparent)]
+    SideTips(#[from] side_tips::Error),
 }
