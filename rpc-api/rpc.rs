@@ -1,17 +1,17 @@
 use super::{
-    Address, AssetId, Authorization, Balance, BallotItem, BitcoinOutputContent,
-    Block, BlockHash, Body, CalculateInitialLiquidityRequest,
-    ClaimedDecisionInfo, ConsensusResults, CreateTradeRequest,
-    CreateTradeResponse, DecisionClaimItem, DecisionClaimRequest,
-    DecisionClaimResponse, DecisionDetails, DecisionFilter, DecisionListItem,
-    DecisionListingFeeInfo, DecisionPeriodStatus, DecisionState,
-    DecisionSummary, DecisionType, DimensionInput, Dst, EncryptionPubKey,
-    FilledOutputContent, Header, InitialLiquidityCalculation,
-    MainchainSyncPhase, MainchainSyncProgress, MarketAmplifyBetaRequest,
-    MarketBuyRequest, MarketBuyResponse, MarketCreateRequest,
-    MarketCreateResponse, MarketData, MarketOutcome, MarketSellRequest,
-    MarketSellResponse, MarketSummary, MerkleRoot, OutPoint, Output,
-    OutputContent, ParticipationStats, Peer, PeerConnectionStatus,
+    Address, AssetId, Authorization, Authorized, Balance, BallotItem,
+    BitcoinOutputContent, Block, BlockHash, Body,
+    CalculateInitialLiquidityRequest, ClaimedDecisionInfo, ConsensusResults,
+    CreateTradeRequest, CreateTradeResponse, DecisionClaimItem,
+    DecisionClaimRequest, DecisionClaimResponse, DecisionDetails,
+    DecisionFilter, DecisionListItem, DecisionListingFeeInfo,
+    DecisionPeriodStatus, DecisionState, DecisionSummary, DecisionType,
+    DimensionInput, Dst, EncryptionPubKey, FilledOutputContent, Header,
+    InitialLiquidityCalculation, MainchainSyncPhase, MainchainSyncProgress,
+    MarketAmplifyBetaRequest, MarketBuyRequest, MarketBuyResponse,
+    MarketCreateRequest, MarketCreateResponse, MarketData, MarketOutcome,
+    MarketSellRequest, MarketSellResponse, MarketSummary, MerkleRoot, OutPoint,
+    Output, OutputContent, ParticipationStats, Peer, PeerConnectionStatus,
     PeriodPricingSummary, PeriodStats, PointedOutput, RpcResult, ScoreChange,
     SharePosition, Signature, SocketAddr, Transaction, TxData, TxIn, TxInfo,
     Txid, UserHoldings, VerifyingKey, VoteFilter, VoteInfo, VoterInfo,
@@ -252,9 +252,24 @@ pub trait Rpc {
         msg: String,
     ) -> RpcResult<Authorization>;
 
+    /// Sign a transaction, and optionally broadcast it.
+    #[method(name = "sign_transaction")]
+    async fn sign_transaction(
+        &self,
+        transaction: Transaction,
+        broadcast: Option<bool>,
+    ) -> RpcResult<Authorized<Transaction>>;
+
     /// Stop the node
     #[method(name = "stop")]
     async fn stop(&self);
+
+    /// Verify and broadcast a transaction
+    #[method(name = "submit_transaction")]
+    async fn submit_transaction(
+        &self,
+        transaction: Authorized<Transaction>,
+    ) -> RpcResult<Txid>;
 
     /// Transfer funds to the specified address
     #[method(name = "transfer")]

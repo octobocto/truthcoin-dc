@@ -1,4 +1,5 @@
 use std::{
+    marker::PhantomData,
     net::{Ipv4Addr, SocketAddr},
     time::Duration,
 };
@@ -12,8 +13,8 @@ use truthcoin_dc::{
     authorization::{Dst, Signature},
     math::trading,
     types::{
-        Address, BlockHash, EncryptionPubKey, THIS_SIDECHAIN, Txid,
-        VerifyingKey,
+        Address, AuthorizedTransaction, BlockHash, EncryptionPubKey,
+        THIS_SIDECHAIN, Transaction, Txid, VerifyingKey,
     },
 };
 use truthcoin_dc_app_rpc_api::RpcClient;
@@ -38,6 +39,20 @@ where
     T: Serialize,
 {
     Ok(serde_json::to_string_pretty(data)?)
+}
+
+struct JsonParser<T>(PhantomData<T>);
+
+impl<T> JsonParser<T> {
+    fn parse(
+        s: &str,
+    ) -> Result<T, serde_path_to_error::Error<serde_json::Error>>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let mut deserializer = serde_json::Deserializer::from_str(s);
+        serde_path_to_error::deserialize(&mut deserializer)
+    }
 }
 
 fn render_period_slot_grid(
@@ -123,6 +138,20 @@ pub enum Command {
     /// Stop the node
     #[command(name = "stop", alias = "shutdown")]
     Stop,
+
+    /// Sign a transaction, and optionally broadcast it.
+    SignTransaction {
+        #[arg(value_parser = JsonParser::<Transaction>::parse)]
+        transaction: Transaction,
+        #[arg(default_value_t = false)]
+        broadcast: bool,
+    },
+
+    /// Verify and broadcast a transaction
+    SubmitTransaction {
+        #[arg(value_parser = JsonParser::<AuthorizedTransaction>::parse)]
+        transaction: AuthorizedTransaction,
+    },
 
     /// Attempt to mine a sidechain block
     #[command(name = "mine", alias = "m")]
@@ -682,6 +711,19 @@ where
         Command::Stop => {
             let () = rpc_client.stop().await?;
             "Node stopping...".to_string()
+        }
+        Command::SignTransaction {
+            transaction,
+            broadcast,
+        } => {
+            let authorized = rpc_client
+                .sign_transaction(transaction, Some(broadcast))
+                .await?;
+            serde_json::to_string_pretty(&authorized)?
+        }
+        Command::SubmitTransaction { transaction } => {
+            let txid = rpc_client.submit_transaction(transaction).await?;
+            format!("{txid}")
         }
         Command::Mine { fee_sats } => {
             let () = rpc_client.mine(Some(fee_sats)).await?;

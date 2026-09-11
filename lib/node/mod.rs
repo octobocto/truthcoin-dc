@@ -307,16 +307,16 @@ where
 
     pub fn submit_transaction(
         &self,
-        transaction: AuthorizedTransaction,
+        transaction: &AuthorizedTransaction,
     ) -> Result<(), Error> {
         {
             let mut rwtxn = self.env.write_txn()?;
             self.state.validate_transaction(
                 &self.archive,
                 &rwtxn,
-                &transaction,
+                transaction,
             )?;
-            self.mempool.put(&mut rwtxn, &transaction)?;
+            self.mempool.put(&mut rwtxn, transaction)?;
 
             if let Some(data) = transaction.transaction.data.as_ref() {
                 match data {

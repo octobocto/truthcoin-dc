@@ -1036,7 +1036,7 @@ impl FilledTransaction {
     }
 }
 
-#[derive(BorshSerialize, Clone, Debug, Deserialize, Serialize)]
+#[derive(BorshSerialize, Clone, Debug, Deserialize, Serialize, ToSchema)]
 pub struct Authorized<T> {
     pub transaction: T,
     /// Authorizations are called witnesses in Bitcoin.

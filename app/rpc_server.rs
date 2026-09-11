@@ -24,9 +24,9 @@ use truthcoin_dc::{
     node::Node,
     state::period_to_name,
     types::{
-        Address, Authorization, Block, BlockHash, EncryptionPubKey,
-        FilledOutputContent, MainchainSyncProgress, PointedOutput, Transaction,
-        Txid, VerifyingKey, WithdrawalBundle,
+        Address, Authorization, AuthorizedTransaction, Block, BlockHash,
+        EncryptionPubKey, FilledOutputContent, MainchainSyncProgress,
+        PointedOutput, Transaction, Txid, VerifyingKey, WithdrawalBundle,
     },
     validation::DecisionValidator,
     wallet::{Balance, CreateMarketInput, DecisionClaimInput},
@@ -799,8 +799,35 @@ impl RpcServer for RpcServerImpl {
             .map_err(custom_err)
     }
 
+    async fn sign_transaction(
+        &self,
+        transaction: Transaction,
+        broadcast: Option<bool>,
+    ) -> RpcResult<AuthorizedTransaction> {
+        let authorized =
+            self.app.wallet.authorize(transaction).map_err(custom_err)?;
+        if let Some(true) = broadcast {
+            let () = self
+                .app
+                .submit_transaction(&authorized)
+                .map_err(custom_err)?;
+        }
+        Ok(authorized)
+    }
+
     async fn stop(&self) {
         std::process::exit(0);
+    }
+
+    async fn submit_transaction(
+        &self,
+        transaction: AuthorizedTransaction,
+    ) -> RpcResult<Txid> {
+        let () = self
+            .app
+            .submit_transaction(&transaction)
+            .map_err(custom_err)?;
+        Ok(transaction.transaction.txid())
     }
 
     async fn transfer(
@@ -2638,7 +2665,6 @@ impl RpcServer for RpcServerImpl {
     }
 
     async fn push_tx(&self, tx_hex: String) -> RpcResult<Txid> {
-        use truthcoin_dc::types::AuthorizedTransaction;
         let bytes = hex::decode(&tx_hex)
             .map_err(|e| custom_err_msg(format!("invalid hex: {e}")))?;
         let tx: AuthorizedTransaction =
@@ -2648,7 +2674,7 @@ impl RpcServer for RpcServerImpl {
                 ))
             })?;
         let txid = tx.transaction.txid();
-        self.app.node.submit_transaction(tx).map_err(custom_err)?;
+        self.app.node.submit_transaction(&tx).map_err(custom_err)?;
         Ok(txid)
     }
 

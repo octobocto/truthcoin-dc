@@ -18,6 +18,7 @@ serde = { workspace = true }
 truthcoin_dc = { path = "../lib", features = ["clap"] }
 truthcoin_dc_app_rpc_api = { path = "../rpc-api" }
 serde_json = { workspace = true }
+serde_path_to_error = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

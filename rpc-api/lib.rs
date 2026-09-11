@@ -11,8 +11,8 @@ use truthcoin_dc::{
     net::{Peer, PeerConnectionStatus},
     state::decisions::DecisionType,
     types::{
-        Address, AssetId, Authorization, BitcoinOutputContent, Block,
-        BlockHash, Body, EncryptionPubKey, FilledOutputContent, Header,
+        Address, AssetId, Authorization, Authorized, BitcoinOutputContent,
+        Block, BlockHash, Body, EncryptionPubKey, FilledOutputContent, Header,
         MainchainSyncPhase, MainchainSyncProgress, MerkleRoot, OutPoint,
         Output, OutputContent, PointedOutput, Transaction, TxData, TxIn, Txid,
         VerifyingKey, WithdrawalBundle, WithdrawalOutputContent,
