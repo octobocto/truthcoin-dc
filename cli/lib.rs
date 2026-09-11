@@ -270,6 +270,12 @@ pub enum Command {
         block_hash: truthcoin_dc::types::BlockHash,
     },
 
+    /// Get stxos for addresses
+    GetStxos {
+        #[arg(required = true)]
+        addresses: Vec<Address>,
+    },
+
     /// Get transaction by txid
     #[command(name = "get-transaction", alias = "get-tx")]
     GetTransaction { txid: Txid },
@@ -277,6 +283,12 @@ pub enum Command {
     /// Get transaction info
     #[command(name = "get-transaction-info")]
     GetTransactionInfo { txid: Txid },
+
+    /// Get utxos for addresses
+    GetUtxos {
+        #[arg(required = true)]
+        addresses: Vec<Address>,
+    },
 
     /// Get pending withdrawal bundle
     #[command(name = "pending-withdrawal-bundle")]
@@ -842,6 +854,11 @@ where
                 rpc_client.get_bmm_inclusions(block_hash).await?;
             json_response(&bmm_inclusions)?
         }
+        Command::GetStxos { addresses } => {
+            let addresses = addresses.into_iter().collect();
+            let stxos = rpc_client.get_stxos(addresses).await?;
+            json_response(&stxos)?
+        }
         Command::GetTransaction { txid } => {
             let tx = rpc_client.get_transaction(txid).await?;
             json_response(&tx)?
@@ -849,6 +866,11 @@ where
         Command::GetTransactionInfo { txid } => {
             let tx_info = rpc_client.get_transaction_info(txid).await?;
             json_response(&tx_info)?
+        }
+        Command::GetUtxos { addresses } => {
+            let addresses = addresses.into_iter().collect();
+            let utxos = rpc_client.get_utxos(addresses).await?;
+            json_response(&utxos)?
         }
         Command::PendingWithdrawalBundle => {
             let withdrawal_bundle =

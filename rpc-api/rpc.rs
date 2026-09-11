@@ -7,16 +7,17 @@ use super::{
     DecisionFilter, DecisionListItem, DecisionListingFeeInfo,
     DecisionPeriodStatus, DecisionState, DecisionSummary, DecisionType,
     DimensionInput, Dst, EncryptionPubKey, FilledOutputContent, Header,
-    InitialLiquidityCalculation, MainchainSyncPhase, MainchainSyncProgress,
-    MarketAmplifyBetaRequest, MarketBuyRequest, MarketBuyResponse,
-    MarketCreateRequest, MarketCreateResponse, MarketData, MarketOutcome,
-    MarketSellRequest, MarketSellResponse, MarketSummary, MerkleRoot, OutPoint,
-    Output, OutputContent, ParticipationStats, Peer, PeerConnectionStatus,
-    PeriodPricingSummary, PeriodStats, PointedOutput, RpcResult, ScoreChange,
-    SharePosition, Signature, SocketAddr, Transaction, TxData, TxIn, TxInfo,
-    Txid, UserHoldings, VerifyingKey, VoteFilter, VoteInfo, VoterInfo,
-    VoterInfoFull, VotingPeriodFull, WithdrawalBundle, WithdrawalOutputContent,
-    open_api, rpc, schema, truthcoin_schema,
+    InPoint, InitialLiquidityCalculation, M6id, MainchainSyncPhase,
+    MainchainSyncProgress, MarketAmplifyBetaRequest, MarketBuyRequest,
+    MarketBuyResponse, MarketCreateRequest, MarketCreateResponse, MarketData,
+    MarketOutcome, MarketSellRequest, MarketSellResponse, MarketSummary,
+    MerkleRoot, OutPoint, Output, OutputContent, ParticipationStats, Peer,
+    PeerConnectionStatus, PeriodPricingSummary, PeriodStats, PointedOutput,
+    PointedSpentOutput, RpcResult, ScoreChange, SharePosition, Signature,
+    SocketAddr, SpentOutput, Transaction, TxData, TxIn, TxInfo, Txid,
+    UserHoldings, VerifyingKey, VoteFilter, VoteInfo, VoterInfo, VoterInfoFull,
+    VotingPeriodFull, WithdrawalBundle, WithdrawalOutputContent, open_api, rpc,
+    schema, truthcoin_schema,
 };
 
 #[open_api(ref_schemas[
@@ -31,9 +32,9 @@ use super::{
     EncryptionPubKey, FilledOutputContent, Header, InitialLiquidityCalculation,
     MainchainSyncPhase, MarketBuyRequest, MarketBuyResponse, MarketData,
     MarketOutcome, MarketSellRequest, MarketSellResponse, MarketSummary,
-    MerkleRoot, OutPoint, Output, OutputContent,
+    InPoint, M6id, MerkleRoot, OutPoint, Output, OutputContent,
     ParticipationStats, PeerConnectionStatus, PeriodStats,
-    ScoreChange,
+    ScoreChange, SpentOutput,
     SharePosition, Signature, DecisionDetails, DecisionFilter, DecisionListItem, DecisionListingFeeInfo, DecisionState, DecisionPeriodStatus, DecisionType,
     Transaction, TxData, Txid, TxIn, UserHoldings,
     BallotItem, VoteFilter, VoteInfo, VoterInfo, VoterInfoFull,
@@ -148,6 +149,13 @@ pub trait Rpc {
     #[method(name = "get_new_verifying_key")]
     async fn get_new_verifying_key(&self) -> RpcResult<VerifyingKey>;
 
+    /// Get stxos for addresses
+    #[method(name = "get_stxos")]
+    async fn get_stxos(
+        &self,
+        addresses: std::collections::HashSet<Address>,
+    ) -> RpcResult<Vec<PointedSpentOutput>>;
+
     /// Get transaction by txid
     #[method(name = "get_transaction")]
     async fn get_transaction(
@@ -161,6 +169,13 @@ pub trait Rpc {
         &self,
         txid: Txid,
     ) -> RpcResult<Option<TxInfo>>;
+
+    /// Get utxos for addresses
+    #[method(name = "get_utxos")]
+    async fn get_utxos(
+        &self,
+        addresses: std::collections::HashSet<Address>,
+    ) -> RpcResult<Vec<PointedOutput<FilledOutputContent>>>;
 
     /// Get wallet addresses, sorted by base58 encoding
     #[method(name = "get_wallet_addresses")]

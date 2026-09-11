@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{collections::HashSet, net::SocketAddr};
 
 use bitcoin::Amount;
 use jsonrpsee::{
@@ -35,8 +35,9 @@ use truthcoin_dc_app_rpc_api::{
     ConsensusResults, CreateTradeRequest, CreateTradeResponse, DecisionFilter,
     DecisionListItem, DecisionState, DecisionSummary, MarketAmplifyBetaRequest,
     MarketBuyRequest, MarketBuyResponse, MarketSellRequest, MarketSellResponse,
-    ParticipationStats, PeriodStats, RpcServer, SubmitBallotRequest, TxInfo,
-    VoteFilter, VoteInfo, VoterInfo, VoterInfoFull, VotingPeriodFull,
+    ParticipationStats, PeriodStats, PointedSpentOutput, RpcServer,
+    SubmitBallotRequest, TxInfo, VoteFilter, VoteInfo, VoterInfo,
+    VoterInfoFull, VotingPeriodFull,
 };
 
 use crate::app::App;
@@ -616,6 +617,21 @@ impl RpcServer for RpcServerImpl {
         self.app.wallet.get_new_verifying_key().map_err(custom_err)
     }
 
+    async fn get_stxos(
+        &self,
+        addresses: HashSet<Address>,
+    ) -> RpcResult<Vec<PointedSpentOutput>> {
+        let res = self
+            .app
+            .node
+            .get_stxos_by_addresses(&addresses)
+            .map_err(custom_err)?
+            .into_iter()
+            .map(|(outpoint, output)| PointedSpentOutput { outpoint, output })
+            .collect();
+        Ok(res)
+    }
+
     async fn get_transaction(
         &self,
         txid: Txid,
@@ -664,6 +680,21 @@ impl RpcServer for RpcServerImpl {
             txin,
         };
         Ok(Some(res))
+    }
+
+    async fn get_utxos(
+        &self,
+        addresses: HashSet<Address>,
+    ) -> RpcResult<Vec<PointedOutput<FilledOutputContent>>> {
+        let res = self
+            .app
+            .node
+            .get_utxos_by_addresses(&addresses)
+            .map_err(custom_err)?
+            .into_iter()
+            .map(|(outpoint, output)| PointedOutput { outpoint, output })
+            .collect();
+        Ok(res)
     }
 
     async fn get_wallet_addresses(&self) -> RpcResult<Vec<Address>> {

@@ -419,7 +419,9 @@ mod tests {
 }
 
 /// Reference to a tx input.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize, ToSchema,
+)]
 pub enum InPoint {
     /// Transaction input
     Regular {

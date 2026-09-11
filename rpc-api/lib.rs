@@ -13,16 +13,23 @@ use truthcoin_dc::{
     types::{
         Address, AssetId, Authorization, Authorized, BitcoinOutputContent,
         Block, BlockHash, Body, EncryptionPubKey, FilledOutputContent, Header,
-        MainchainSyncPhase, MainchainSyncProgress, MerkleRoot, OutPoint,
-        Output, OutputContent, PointedOutput, Transaction, TxData, TxIn, Txid,
-        VerifyingKey, WithdrawalBundle, WithdrawalOutputContent,
-        schema as truthcoin_schema,
+        InPoint, M6id, MainchainSyncPhase, MainchainSyncProgress, MerkleRoot,
+        OutPoint, Output, OutputContent, PointedOutput, SpentOutput,
+        Transaction, TxData, TxIn, Txid, VerifyingKey, WithdrawalBundle,
+        WithdrawalOutputContent, schema as truthcoin_schema,
     },
     wallet::Balance,
 };
 use utoipa::ToSchema;
 
 mod schema;
+
+/// A spent output, and the outpoint that created it
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+pub struct PointedSpentOutput {
+    pub outpoint: OutPoint,
+    pub output: SpentOutput,
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
 pub struct TxInfo {
