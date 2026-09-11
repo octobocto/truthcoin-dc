@@ -57,6 +57,8 @@ pub struct MempoolTx {
     /// Borsh size in bytes
     pub size: u64,
     pub tx: Transaction,
+    /// Borsh encoding, as hex
+    pub raw: String,
 }
 
 pub use truthcoin_dc::state::decisions::DecisionState;

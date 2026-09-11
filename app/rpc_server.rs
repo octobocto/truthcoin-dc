@@ -759,11 +759,12 @@ impl RpcServer for RpcServerImpl {
         txs.into_iter()
             .map(|authorized| {
                 let tx = authorized.transaction;
-                let size = borsh::object_length(&tx).map_err(custom_err)?;
+                let raw = borsh::to_vec(&tx).map_err(custom_err)?;
                 Ok(MempoolTx {
                     txid: tx.txid(),
-                    size: size as u64,
+                    size: raw.len() as u64,
                     tx,
+                    raw: const_hex::encode(raw),
                 })
             })
             .collect()

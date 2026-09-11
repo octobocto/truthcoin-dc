@@ -95,6 +95,7 @@ async fn list_mempool_task(
     anyhow::ensure!(entry.txid == txid);
     anyhow::ensure!(entry.tx.txid() == txid);
     anyhow::ensure!(entry.size > 0);
+    anyhow::ensure!(const_hex::decode(&entry.raw)?.len() as u64 == entry.size);
 
     tracing::debug!("Checking that a block empties the mempool");
     let () = sidechain.bmm_single(&mut enforcer_post_setup).await?;
