@@ -16,7 +16,7 @@ use bip300301_enforcer_integration_tests::{
 use futures::{FutureExt, StreamExt as _, channel::mpsc, future::BoxFuture};
 use tokio::time::sleep;
 use tracing::Instrument as _;
-use truthcoin_dc_app_rpc_api::RpcClient as _;
+use truthcoin_dc_app_rpc_api::node::{PrivateRpcClient as _, RpcClient as _};
 
 use crate::{
     setup::{Init, PostSetup},

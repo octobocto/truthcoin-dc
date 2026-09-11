@@ -25,8 +25,9 @@ use truthcoin_dc::{
 use truthcoin_dc_app_rpc_api::{
     BallotItem, CreateTradeRequest, DecisionClaimItem, DecisionClaimRequest,
     DecisionContentInfo, DecisionFilter, DecisionState, DimensionInput,
-    MarketBuyRequest, MarketCreateRequest, MarketSellRequest, RpcClient as _,
-    VoteFilter,
+    MarketBuyRequest, MarketCreateRequest, MarketSellRequest, VoteFilter,
+    node::{PrivateRpcClient as _, RpcClient as _},
+    wallet::RpcClient as _,
 };
 
 use crate::{

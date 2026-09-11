@@ -3,7 +3,6 @@
 use std::net::SocketAddr;
 
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use l2l_openapi::open_api;
 
 use serde::{Deserialize, Serialize};
 use truthcoin_dc::{
@@ -27,6 +26,64 @@ use utoipa::ToSchema;
 mod schema;
 #[cfg(test)]
 mod test;
+
+fn build_openapi(
+    build: fn() -> utoipa::openapi::OpenApi,
+) -> std::io::Result<utoipa::openapi::OpenApi> {
+    // The generated doc builds every schema in one stack frame. That frame
+    // does not fit a default 2MB thread stack.
+    const STACK_SIZE: usize = 32 * 1024 * 1024;
+    std::thread::Builder::new()
+        .name("openapi-builder".to_owned())
+        .stack_size(STACK_SIZE)
+        .spawn(build)?
+        .join()
+        .map_err(|_panic| {
+            std::io::Error::other("the OpenAPI builder thread panicked")
+        })
+}
+
+/// Build the OpenAPI document that describes all RPC methods.
+///
+/// # Errors
+/// Fails when the builder thread does not start, or panics.
+pub fn openapi() -> std::io::Result<utoipa::openapi::OpenApi> {
+    build_openapi(|| {
+        use utoipa::OpenApi as _;
+        let mut res = open_api::RpcDoc::openapi();
+        res.merge(node::PrivateRpcDoc::openapi());
+        res.merge(node::RpcDoc::openapi());
+        res.merge(wallet::RpcDoc::openapi());
+        res
+    })
+}
+
+/// Build the OpenAPI document that describes the public RPC methods.
+///
+/// # Errors
+/// Fails when the builder thread does not start, or panics.
+pub fn public_openapi() -> std::io::Result<utoipa::openapi::OpenApi> {
+    build_openapi(|| {
+        use utoipa::OpenApi as _;
+        let mut res = open_api::RpcDoc::openapi();
+        res.merge(node::RpcDoc::openapi());
+        res
+    })
+}
+
+/// Build the OpenAPI document that describes the private RPC methods.
+///
+/// # Errors
+/// Fails when the builder thread does not start, or panics.
+pub fn private_openapi() -> std::io::Result<utoipa::openapi::OpenApi> {
+    build_openapi(|| {
+        use utoipa::OpenApi as _;
+        let mut res = open_api::RpcDoc::openapi();
+        res.merge(node::PrivateRpcDoc::openapi());
+        res.merge(wallet::RpcDoc::openapi());
+        res
+    })
+}
 
 /// A spent output, and the outpoint that created it
 #[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
@@ -535,4 +592,4 @@ pub struct ScoreChange {
 #[allow(clippy::double_must_use)]
 mod rpc;
 
-pub use rpc::{RpcClient, RpcDoc, RpcServer};
+pub use rpc::{node, open_api, wallet};

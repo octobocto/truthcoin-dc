@@ -18,7 +18,10 @@ use truthcoin_dc::{
     },
     wallet::TransferDests,
 };
-use truthcoin_dc_app_rpc_api::RpcClient;
+use truthcoin_dc_app_rpc_api::{
+    node::{PrivateRpcClient as _, RpcClient as _},
+    wallet::RpcClient as _,
+};
 use url::{Host, Url};
 
 /// Format transaction success messages consistently
@@ -786,9 +789,7 @@ where
             format!("Mining block with fee {fee_sats} sats")
         }
         Command::OpenApiSchema => {
-            let openapi =
-                <truthcoin_dc_app_rpc_api::RpcDoc as utoipa::OpenApi>::openapi(
-                );
+            let openapi = truthcoin_dc_app_rpc_api::openapi()?;
             openapi.to_pretty_json()?
         }
 
