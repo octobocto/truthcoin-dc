@@ -24,7 +24,7 @@ fraction = "0.14.0"
 futures = { version = "0.3.30", default-features = false }
 http = "1.2.0"
 itertools = "0.14.0"
-jsonrpsee = { version = "0.25.1", features = ["tracing"] }
+jsonrpsee = { version = "0.26.0", features = ["tracing"] }
 parking_lot = "0.12.1"
 prost = "0.14.3"
 semver = "1.0.2"
@@ -57,7 +57,7 @@ rev = "1100b6085d9ed64eeaf1b57b3c44609626bd4b23"
 
 [workspace.dependencies.l2l-openapi]
 git = "https://github.com/Ash-L2L/l2l-openapi"
-rev = "5f8fb2237c95725731d5fb10542098303d82e215"
+rev = "caa8c1c248aca1827b57007dcfcd8ff70d607e8e"
 
 [workspace.dependencies.libes]
 version = "0.9.1"
