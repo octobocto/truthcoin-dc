@@ -407,4 +407,70 @@ mod tests {
         let txs = vec![claim_tx(&[[1, 2, 3]]), claim_tx(&[[4, 5, 6]])];
         assert!(BlockValidator::check_duplicate_decision_claims(&txs).is_ok());
     }
+
+    #[test]
+    fn cannot_spend_withdrawal_output() -> anyhow::Result<()> {
+        use crate::{
+            archive::Archive,
+            state::{Error, State},
+            types::{
+                Address, BitcoinOutputContent, FilledOutput,
+                FilledOutputContent, FilledTransaction, Hash, OutPoint, Output,
+                OutputContent, Transaction, Txid, WithdrawalOutputContent,
+            },
+        };
+
+        let dir = tempfile::tempdir()?;
+        let env_path = dir.path().join("data.mdb");
+        std::fs::create_dir_all(&env_path)?;
+        let mut opts = heed::EnvOpenOptions::new();
+        opts.map_size(64 * 1024 * 1024)
+            .max_dbs(State::NUM_DBS + Archive::NUM_DBS);
+        let env = unsafe { sneed::Env::open(&opts, &env_path) }?;
+        let state = State::new(&env, None)?;
+        let archive = Archive::new(&env)?;
+
+        let main_address = "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2"
+            .parse::<bitcoin::Address<
+            bitcoin::address::NetworkUnchecked,
+        >>()?;
+        let withdrawal = FilledOutput {
+            address: Address::ALL_ZEROS,
+            content: FilledOutputContent::BitcoinWithdrawal(
+                WithdrawalOutputContent {
+                    value: bitcoin::Amount::from_sat(1000),
+                    main_fee: bitcoin::Amount::from_sat(300),
+                    main_address,
+                },
+            ),
+            memo: Vec::new(),
+        };
+        let outpoint = OutPoint::Regular {
+            txid: Txid(Hash::from([1; 32])),
+            vout: 0,
+        };
+        let tx = FilledTransaction {
+            transaction: Transaction {
+                inputs: vec![outpoint],
+                outputs: vec![Output {
+                    address: Address::ALL_ZEROS,
+                    content: OutputContent::Bitcoin(BitcoinOutputContent(
+                        bitcoin::Amount::from_sat(1300),
+                    )),
+                    memo: Vec::new(),
+                }],
+                ..Default::default()
+            },
+            spent_utxos: vec![withdrawal],
+            actor_address: None,
+        };
+        let rotxn = env.read_txn()?;
+        assert!(matches!(
+            BlockValidator::validate_filled_transaction(
+                &state, &archive, &rotxn, &tx, None
+            ),
+            Err(Error::SpendWithdrawalOutput { .. })
+        ));
+        Ok(())
+    }
 }
