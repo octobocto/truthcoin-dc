@@ -1,6 +1,7 @@
 use std::{
     collections::HashSet,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    sync::Arc,
     time::Duration,
 };
 
@@ -378,6 +379,143 @@ async fn a_seed_host_name_dials_at_startup() -> anyhow::Result<()> {
     let peers = net.get_active_peers();
     assert_eq!(peers.len(), 1);
     assert_eq!(peers[0].address, addr);
+    let rotxn = env.read_txn()?;
+    assert_eq!(net.known_peers.len(&rotxn)?, 0);
+    Ok(())
+}
+
+const TEST_REDIAL_MIN_DELAY: Duration = Duration::from_millis(50);
+const TEST_REDIAL_MAX_DELAY: Duration = Duration::from_millis(200);
+
+fn resolver_with_hosts(
+    hosts_conf: &str,
+) -> anyhow::Result<hickory_resolver::TokioResolver> {
+    let mut hosts = hickory_resolver::Hosts::default();
+    hosts.read_hosts_conf(hosts_conf.as_bytes())?;
+    let mut resolver = hickory_resolver::Resolver::builder_tokio()?.build()?;
+    resolver.set_hosts(Arc::new(hosts));
+    Ok(resolver)
+}
+
+async fn wait_for_a_peer(net: &Net) -> anyhow::Result<()> {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while net.get_active_peers().is_empty() {
+            tokio::time::sleep(TEST_REDIAL_MIN_DELAY).await;
+        }
+    })
+    .await
+    .context("the node dialed no peer again")?;
+    Ok(())
+}
+
+/// A peer that drops leaves no connection, so the node dials it again.
+#[tokio::test]
+async fn a_lost_peer_is_dialed_again() -> anyhow::Result<()> {
+    let (_dir, env, net, _info_rx) = temp_net()?;
+    let (remote, _) = super::make_server_endpoint(
+        (Ipv4Addr::LOCALHOST, 0).into(),
+        HashSet::new(),
+    )?;
+    let addr = remote.local_addr()?;
+    net.connect_peer(env.clone(), addr.into())?;
+    assert_eq!(net.get_active_peers().len(), 1);
+    net.remove_active_peer(addr);
+    assert!(net.get_active_peers().is_empty());
+
+    let redial = tokio::spawn({
+        let net = net.clone();
+        async move {
+            net.redial_known_peers(
+                env,
+                TEST_REDIAL_MIN_DELAY,
+                TEST_REDIAL_MAX_DELAY,
+            )
+            .await
+        }
+    });
+    let dialed_again = wait_for_a_peer(&net).await;
+    redial.abort();
+
+    dialed_again?;
+    assert_eq!(net.get_active_peers()[0].address, addr);
+    Ok(())
+}
+
+/// A peer that holds a connection takes no redial, and the loop starts no
+/// second connection to it.
+#[tokio::test]
+async fn a_connected_peer_takes_no_redial() -> anyhow::Result<()> {
+    let (_dir, env, net, _info_rx) = temp_net()?;
+    let (remote, _) = super::make_server_endpoint(
+        (Ipv4Addr::LOCALHOST, 0).into(),
+        HashSet::new(),
+    )?;
+    let addr = remote.local_addr()?;
+    net.connect_peer(env.clone(), addr.into())?;
+
+    assert!(!net.dial_peer(env.clone(), addr.into())?);
+    assert_eq!(net.dial_known_peers(&env).await?, 0);
+
+    let redial = tokio::spawn({
+        let net = net.clone();
+        let env = env.clone();
+        async move {
+            net.redial_known_peers(
+                env,
+                TEST_REDIAL_MIN_DELAY,
+                TEST_REDIAL_MAX_DELAY,
+            )
+            .await
+        }
+    });
+    tokio::time::sleep(TEST_REDIAL_MAX_DELAY * 5).await;
+    redial.abort();
+
+    let peers = net.get_active_peers();
+    assert_eq!(peers.len(), 1);
+    assert_eq!(peers[0].address, addr);
+    Ok(())
+}
+
+/// A seed host name resolves again at each redial, so the node reaches a seed
+/// that moved to another address.
+#[tokio::test]
+async fn a_seed_host_name_dials_its_new_address() -> anyhow::Result<()> {
+    let domain = "seed.truthcoin.test";
+    let (_dir, env, mut net, _info_rx) = temp_net()?;
+    let (remote, _) = super::make_server_endpoint(
+        (Ipv4Addr::LOCALHOST, 0).into(),
+        HashSet::from([domain.to_owned()]),
+    )?;
+    let addr = remote.local_addr()?;
+    let seed_addr: SeedAddress = format!("{domain}:{}", addr.port()).parse()?;
+    net.seed_names = Arc::new(HashSet::from([seed_addr.clone()]));
+
+    net.dns_resolver =
+        Arc::new(resolver_with_hosts(&format!("0.0.0.0 {domain}"))?);
+    let error = net.dial_seed(env.clone(), seed_addr).await.unwrap_err();
+    assert!(matches!(error, super::error::DialSeed::DnsResolve(_)));
+    assert!(net.get_active_peers().is_empty());
+
+    net.dns_resolver =
+        Arc::new(resolver_with_hosts(&format!("127.0.0.1 {domain}"))?);
+    let redial = tokio::spawn({
+        let net = net.clone();
+        let env = env.clone();
+        async move {
+            net.redial_known_peers(
+                env,
+                TEST_REDIAL_MIN_DELAY,
+                TEST_REDIAL_MAX_DELAY,
+            )
+            .await
+        }
+    });
+    let dialed_again = wait_for_a_peer(&net).await;
+    redial.abort();
+
+    dialed_again?;
+    assert_eq!(net.get_active_peers()[0].address, addr);
     let rotxn = env.read_txn()?;
     assert_eq!(net.known_peers.len(&rotxn)?, 0);
     Ok(())

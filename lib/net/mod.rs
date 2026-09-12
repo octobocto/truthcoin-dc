@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet, hash_map},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
+    time::Duration,
 };
 
 use fallible_iterator::FallibleIterator;
@@ -10,7 +11,9 @@ use heed::types::{SerdeBincode, Unit};
 use hickory_resolver::TokioResolver;
 use parking_lot::RwLock;
 use quinn::{ClientConfig, Endpoint, ServerConfig};
-use sneed::{DatabaseUnique, DbError, EnvError, RwTxn, RwTxnError, UnitKey};
+use sneed::{
+    DatabaseUnique, DbError, EnvError, RoTxn, RwTxn, RwTxnError, UnitKey,
+};
 use tokio_stream::StreamNotifyClose;
 use tracing::instrument;
 
@@ -257,7 +260,7 @@ pub async fn resolve_seed_address(
 /// Handle to the tasks that dial seed host names. Drop aborts the tasks.
 #[repr(transparent)]
 pub struct DialSeedsHandle(
-    tokio_util::task::JoinMap<SeedAddress, Result<(), error::DialSeed>>,
+    tokio_util::task::JoinMap<SeedAddress, Result<bool, error::DialSeed>>,
 );
 
 // Keep track of peer state
@@ -282,6 +285,8 @@ pub struct Net {
     peer_info_tx:
         mpsc::UnboundedSender<(SocketAddr, Option<PeerConnectionInfo>)>,
     known_peers: DatabaseUnique<SerdeBincode<SocketAddr>, Unit>,
+    /// Seed host names, which resolve at each dial
+    seed_names: Arc<HashSet<SeedAddress>>,
     _version: DatabaseUnique<UnitKey, SerdeBincode<Version>>,
 }
 
@@ -434,16 +439,112 @@ impl Net {
             .map_err(|err| DbError::from(err).into())
     }
 
+    fn known_peer_addrs(
+        &self,
+        rotxn: &RoTxn,
+    ) -> Result<Vec<SocketAddr>, DbError> {
+        let peer_addrs = self.known_peers.iter_keys(rotxn)?.collect()?;
+        Ok(peer_addrs)
+    }
+
+    fn is_active_peer(&self, resolved_addr: &ResolvedSeedAddress) -> bool {
+        let active_peers = self.active_peers.read();
+        resolved_addr.ip_addrs().any(|ip_addr| {
+            active_peers
+                .contains_key(&SocketAddr::new(ip_addr, resolved_addr.port()))
+        })
+    }
+
+    /// Dial a peer that the node does not hold a connection to.
+    /// Returns `true` if a connection started, and `false` if the peer is
+    /// already connected.
+    fn dial_peer(
+        &self,
+        env: sneed::Env<heed::WithoutTls>,
+        resolved_addr: ResolvedSeedAddress,
+    ) -> Result<bool, Error> {
+        if self.is_active_peer(&resolved_addr) {
+            return Ok(false);
+        }
+        let () = self.connect_peer(env, resolved_addr)?;
+        Ok(true)
+    }
+
     async fn dial_seed(
         &self,
         env: sneed::Env<heed::WithoutTls>,
         seed_addr: SeedAddress,
-    ) -> Result<(), error::DialSeed> {
+    ) -> Result<bool, error::DialSeed> {
         tracing::trace!(%seed_addr, "dial seed host name");
         let resolved_addr =
             resolve_seed_address(&self.dns_resolver, seed_addr).await?;
-        self.connect_peer(env, resolved_addr)
+        self.dial_peer(env, resolved_addr)
             .map_err(|err| error::DialSeed::Connect(Box::new(err)))
+    }
+
+    /// Dial every address that the database holds, and every seed host name.
+    /// A seed host name resolves again here, so a seed that moved to another
+    /// address still gets a dial.
+    /// Returns the number of connections that started.
+    async fn dial_known_peers(
+        &self,
+        env: &sneed::Env<heed::WithoutTls>,
+    ) -> Result<usize, Error> {
+        let peer_addrs = {
+            let rotxn = env.read_txn().map_err(EnvError::from)?;
+            self.known_peer_addrs(&rotxn)?
+        };
+        let mut dialed = 0;
+        for peer_addr in peer_addrs {
+            match self.dial_peer(env.clone(), peer_addr.into()) {
+                Ok(true) => dialed += 1,
+                Ok(false) => (),
+                Err(err) => {
+                    tracing::error!(%peer_addr, message = %ErrorChain::new(&err))
+                }
+            }
+        }
+        for seed_addr in self.seed_names.iter() {
+            match self.dial_seed(env.clone(), seed_addr.clone()).await {
+                Ok(true) => dialed += 1,
+                Ok(false) => (),
+                Err(err) => {
+                    tracing::error!(%seed_addr, message = %ErrorChain::new(&err))
+                }
+            }
+        }
+        Ok(dialed)
+    }
+
+    /// Dial the known peers again while no peer connection exists.
+    /// `min_delay` is the shortest wait between two checks for a connection.
+    /// The wait doubles after each redial, up to `max_delay`.
+    /// The future returns only on a database error.
+    pub async fn redial_known_peers(
+        &self,
+        env: sneed::Env<heed::WithoutTls>,
+        min_delay: Duration,
+        max_delay: Duration,
+    ) -> Result<(), Error> {
+        let mut delay = min_delay;
+        let mut no_peers_at_last_check = false;
+        loop {
+            tokio::time::sleep(delay).await;
+            if !self.active_peers.read().is_empty() {
+                delay = min_delay;
+                no_peers_at_last_check = false;
+                continue;
+            }
+            // The net task reconnects to a peer that errored. A redial waits
+            // for a full delay with no connection, so it never dials first.
+            if !no_peers_at_last_check {
+                no_peers_at_last_check = true;
+                continue;
+            }
+            let dialed = self.dial_known_peers(&env).await?;
+            tracing::info!(dialed, "no peer connection: dialed known peers");
+            delay = (2 * delay).min(max_delay);
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -484,6 +585,12 @@ impl Net {
             Arc::new(resolver)
         };
         let (peer_info_tx, peer_info_rx) = mpsc::unbounded();
+        let seed_names: HashSet<SeedAddress> = seed_node_addrs(network)
+            .iter()
+            .map(|seed_addr| seed_addr.to_owned())
+            .chain(add_peers)
+            .filter(|seed_addr| seed_addr.socket_addr().is_none())
+            .collect();
         let net = Net {
             server,
             archive,
@@ -493,20 +600,14 @@ impl Net {
             active_peers,
             peer_info_tx,
             known_peers,
+            seed_names: Arc::new(seed_names),
             _version: version,
         };
-        #[allow(clippy::let_and_return)]
-        let known_peers: Vec<_> = {
+        let known_peers = {
             let rotxn = env.read_txn().map_err(EnvError::from)?;
-            let known_peers = net
-                .known_peers
-                .iter(&rotxn)
-                .map_err(DbError::from)?
-                .collect()
-                .map_err(DbError::from)?;
-            known_peers
+            net.known_peer_addrs(&rotxn)?
         };
-        let () = known_peers.into_iter().try_for_each(|(peer_addr, _)| {
+        let () = known_peers.into_iter().try_for_each(|peer_addr| {
             tracing::trace!(%peer_addr, "connecting to already known peer");
             match net.connect_peer(env.clone(), peer_addr.into()) {
                 Err(Error::Connect(
@@ -531,14 +632,8 @@ impl Net {
         .inspect_err(|err| {
             tracing::error!("unable to connect to known peers during net construction: {err:#}");
         })?;
-        let seed_names: HashSet<SeedAddress> = seed_node_addrs(network)
-            .iter()
-            .map(|seed_addr| seed_addr.to_owned())
-            .chain(add_peers)
-            .filter(|seed_addr| seed_addr.socket_addr().is_none())
-            .collect();
         let mut dial_seeds = tokio_util::task::JoinMap::new();
-        for seed_addr in seed_names {
+        for seed_addr in net.seed_names.iter().cloned() {
             let env = env.clone();
             let net = net.clone();
             dial_seeds.spawn_on(
