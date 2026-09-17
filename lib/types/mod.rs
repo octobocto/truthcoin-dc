@@ -726,6 +726,7 @@ pub enum Network {
     Regtest,
     Forknet,
     Alphanet,
+    Betanet,
 }
 
 /// Semver-compatible version
