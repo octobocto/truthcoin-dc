@@ -17,15 +17,15 @@ pub const MAGIC_BYTES_LEN: usize = 4;
 pub type MagicBytes = [u8; MAGIC_BYTES_LEN];
 
 pub const fn magic_bytes(network: Network) -> MagicBytes {
-    // First 4 bytes are the US-TTY (LSB Right) Baudot–Murray code for "BITS8".
+    // First 4 bytes are the US-TTY (LSB Right) Baudot–Murray code for "TRUTH".
     // Rightmost bits of the 4th byte is the network identifier.
-    let b0 = 0b1100_1001;
-    let b1 = 0b1010_0000;
-    let b2 = 0b0101_1101;
-    let mut b3 = 0b1001_1000;
+    let b0 = 0b1000_0010;
+    let b1 = 0b1000_1111;
+    let b2 = 0b0000_1010;
+    let mut b3 = 0b0000_0000;
     match network {
         Network::Regtest => (),
-        Network::Signet => b3 |= 0b0000_0110,
+        Network::Signet => b3 |= 0b0000_0001,
         Network::Forknet => b3 |= 0b0000_0010,
         Network::Alphanet => b3 |= 0b0000_0011,
     }
@@ -311,9 +311,9 @@ mod network_tests {
 
     #[test]
     fn network_magic_keeps_each_network_separate() {
-        assert_eq!(magic_bytes(Network::Regtest), [0xc9, 0xa0, 0x5d, 0x98]);
-        assert_eq!(magic_bytes(Network::Signet), [0xc9, 0xa0, 0x5d, 0x9e]);
-        assert_eq!(magic_bytes(Network::Forknet), [0xc9, 0xa0, 0x5d, 0x9a]);
-        assert_eq!(magic_bytes(Network::Alphanet), [0xc9, 0xa0, 0x5d, 0x9b]);
+        assert_eq!(magic_bytes(Network::Regtest), [0x82, 0x8f, 0x0a, 0x00]);
+        assert_eq!(magic_bytes(Network::Signet), [0x82, 0x8f, 0x0a, 0x01]);
+        assert_eq!(magic_bytes(Network::Forknet), [0x82, 0x8f, 0x0a, 0x02]);
+        assert_eq!(magic_bytes(Network::Alphanet), [0x82, 0x8f, 0x0a, 0x03]);
     }
 }
