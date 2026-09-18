@@ -14,7 +14,7 @@ jobs:
   #
   # Official GitHub docs on this: https://docs.github.com/en/actions/use-cases-and-examples/publishing-packages/publishing-docker-images
   build-push-docker:
-    runs-on: ubuntu-latest-large
+    runs-on: ubuntu-latest
     # needed to push to GHCR
     permissions:
       contents: read
@@ -22,17 +22,13 @@ jobs:
       attestations: write
       id-token: write
     steps:
-      - name: Lowercase the owner for the registry
-        id: owner
-        run: echo "lc=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
-
       - name: Docker meta
         id: meta
         # https://github.com/docker/metadata-action
         uses: docker/metadata-action@v5
         with:
           images: |
-            ghcr.io/${{ steps.owner.outputs.lc }}/truthcoin
+            ghcr.io/${{ github.repository_owner }}/truthcoin
           # generate Docker tags based on the following events/attributes
           tags: |
             # creates a tag for each push
@@ -57,12 +53,7 @@ jobs:
       - name: Build (and maybe push) Docker image
         uses: docker/build-push-action@v6
         with:
-          # A pull request from a fork gets a read-only token, so a push
-          # to the registry fails. The step name already says "maybe".
-          push: >-
-            ${{ github.event_name != 'pull_request'
-            || github.event.pull_request.head.repo.full_name
-               == github.repository }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           # Caching Docker builds on CI is an eternally
           # difficult task. From the official docs:
@@ -70,5 +61,5 @@ jobs:
           #
           # https://docs.docker.com/build/ci/github-actions/cache/#inline-cache
           # prettier-ignore
-          cache-from: type=registry,ref=ghcr.io/${{ steps.owner.outputs.lc }}/truthcoin:latest
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/truthcoin:latest
           cache-to: type=inline

@@ -6,6 +6,19 @@ on:
     tags:
       - '*'
   workflow_dispatch:
+    inputs:
+      base_branch:
+        description: "Base branch to diff against (only used when cargo_deny_check=auto)"
+        type: string
+        default: master
+      cargo_deny_check:
+        description: "Run or skip the `cargo deny` step"
+        type: choice
+        options:
+          - auto
+          - force-run
+          - force-skip
+        default: auto
 
 name: Check, Lint, Build
 
@@ -17,19 +30,19 @@ jobs:
     name: Check, Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
-      - name: Install latest nightly toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly
-          components: rustfmt, clippy
+      - name: Install pinned Rust toolchain
+        # Channel and components come from rust-toolchain.toml, which is the
+        # single source of truth for the Rust version.
+        run: rustup toolchain install
 
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.5.1
+        uses: Swatinem/rust-cache@v2.9.1
         with:
+          cache-bin: false
           shared-key: x86_64-unknown-linux-gnu
 
       - name: Rustfmt
@@ -41,7 +54,22 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features
       
+      - name: Check changed files
+        id: changed-files
+        if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.cargo_deny_check == 'auto')
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            cargo_lock:
+              - 'Cargo.lock'
+            deny_toml:
+              - 'deny.toml'
+
       - name: Deny
+        if: >-
+          (github.event_name == 'pull_request' && (steps.changed-files.outputs.cargo_lock == 'true' || steps.changed-files.outputs.deny_toml == 'true')) ||
+          (github.event_name == 'workflow_dispatch' && inputs.cargo_deny_check == 'force-run') ||
+          (github.event_name == 'workflow_dispatch' && inputs.cargo_deny_check == 'auto' && (steps.changed-files.outputs.cargo_lock == 'true' || steps.changed-files.outputs.deny_toml == 'true'))
         uses: EmbarkStudios/cargo-deny-action@v2
   
   integration-test:
@@ -59,16 +87,6 @@ jobs:
           chmod +x bitcoin-patched-bins/bitcoind
           chmod +x bitcoin-patched-bins/bitcoin-cli
           popd
-      - name: Download latest bip300301_enforcer
-        run: |
-          pushd ..
-          wget https://releases.drivechain.info/bip300301-enforcer-latest-x86_64-unknown-linux-gnu.zip
-          unzip bip300301-enforcer-latest-x86_64-unknown-linux-gnu.zip
-          rm bip300301-enforcer-latest-x86_64-unknown-linux-gnu.zip
-          mv bip300301-enforcer-latest-x86_64-unknown-linux-gnu/bip300301-enforcer-*-x86_64-unknown-linux-gnu bip300301-enforcer
-          rm -r bip300301-enforcer-latest-x86_64-unknown-linux-gnu
-          chmod +x bip300301-enforcer
-          popd
       - name: Download latest electrs
         run: |
           pushd ..
@@ -78,31 +96,34 @@ jobs:
           mv electrs-latest-x86_64-unknown-linux-gnu electrs
           chmod +x electrs
           popd
-      - name: Install latest nightly toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly
-          target: x86_64-pc-windows-gnu
-      - uses: actions/checkout@v4
+      - name: Install pinned Rust toolchain
+        # Channel comes from rust-toolchain.toml.
+        run: rustup toolchain install
+      - uses: actions/checkout@v6
         with:
           submodules: "recursive"
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.1
         with:
+          cache-bin: false
           shared-key: x86_64-unknown-linux-gnu
+      - name: Build the matched enforcer
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        run: cargo build --locked --manifest-path bip300301_enforcer/Cargo.toml --bin bip300301_enforcer
       - name: Build (debug)
         run: cargo build
       - name: Run integration tests
         id: runIntegrationTests
         run: |
-          export BIP300301_ENFORCER='../bip300301-enforcer'
+          export BIP300301_ENFORCER='target/debug/bip300301_enforcer'
           export BITCOIND='../bitcoin-patched-bins/bitcoind'
           export BITCOIN_CLI='../bitcoin-patched-bins/bitcoin-cli'
           export ELECTRS='../electrs'
           export TRUTHCOIN_APP='target/debug/truthcoin_dc_app'
           cargo run --example integration_tests
 
-  build-release:
+  test-build-release:
     strategy:
       fail-fast: false
       matrix:
@@ -111,7 +132,7 @@ jobs:
             name: x86_64-unknown-linux-gnu
             binary-suffix: ""
             rustflags: ""
-          - os: macos-latest-large
+          - os: macos-latest
             name: x86_64-apple-darwin
             binary-suffix: ""
             rustflags: ""
@@ -123,30 +144,35 @@ jobs:
             name: x86_64-pc-windows-gnu
             binary-suffix: .exe
             rustflags: "-C linker=/usr/bin/x86_64-w64-mingw32-gcc"
-    name: Build, Release ((${{ matrix.name }}))
+    name: Test, Build, Release ((${{ matrix.name }}))
     runs-on: ${{ matrix.os }}
     permissions:
       contents: write
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           submodules: recursive
 
-      - name: Install latest nightly toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly
-          target: ${{ matrix.name }}
+      - name: Install pinned Rust toolchain
+        # Channel comes from rust-toolchain.toml; the cross-compilation
+        # target comes from the build matrix.
+        run: |
+          rustup toolchain install
+          rustup target add '${{ matrix.name }}'
 
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2.5.1
+        uses: Swatinem/rust-cache@v2.9.1
         with:
+          cache-bin: false
           key: ${{ matrix.name }}
 
       - name: Install windows-specific deps
         run: sudo apt install mingw-w64
         if: ${{ matrix.name == 'x86_64-pc-windows-gnu' }}
+
+      - name: Test
+        run: cargo test --tests
 
       - name: Build
         run: cargo build --release --target ${{ matrix.name }}
@@ -159,9 +185,11 @@ jobs:
             jq -er '.packages | map(select(.name == "truthcoin_dc_app") | .version) | .[0]')
           TRUTHCOIN_APP_FILENAME="truthcoin-${TRUTHCOIN_APP_VERSION}-${{ matrix.name }}${{ matrix.binary-suffix }}"
           TRUTHCOIN_CLI_FILENAME="truthcoin-cli-${TRUTHCOIN_APP_VERSION}-${{ matrix.name }}${{ matrix.binary-suffix }}"
+          TRUTHCOIN_ARCHIVE_FILENAME="truthcoin-${TRUTHCOIN_APP_VERSION}-${{ matrix.name }}.zip"
           echo "TRUTHCOIN_APP_VERSION=$TRUTHCOIN_APP_VERSION" >> "$GITHUB_ENV"
           echo "TRUTHCOIN_APP_FILENAME=$TRUTHCOIN_APP_FILENAME" >> "$GITHUB_ENV"
           echo "TRUTHCOIN_CLI_FILENAME=$TRUTHCOIN_CLI_FILENAME" >> "$GITHUB_ENV"
+          echo "TRUTHCOIN_ARCHIVE_FILENAME=$TRUTHCOIN_ARCHIVE_FILENAME" >> "$GITHUB_ENV"
 
       - name: 'Set filenames for release binaries'
         run: |
@@ -170,33 +198,45 @@ jobs:
           ln -fs "truthcoin_dc_app_cli${{ matrix.binary-suffix }}" "${TRUTHCOIN_CLI_FILENAME}"
           popd
 
+      - name: Package release binaries
+        run: |
+          cd "target/${{ matrix.name }}/release"
+          mkdir -p package
+          cp "truthcoin_dc_app${{ matrix.binary-suffix }}" "package/truthcoin${{ matrix.binary-suffix }}"
+          cp "truthcoin_dc_app_cli${{ matrix.binary-suffix }}" "package/truthcoin-cli${{ matrix.binary-suffix }}"
+          cd package
+          zip "../${TRUTHCOIN_ARCHIVE_FILENAME}" "truthcoin${{ matrix.binary-suffix }}" "truthcoin-cli${{ matrix.binary-suffix }}"
+
       - name: 'Upload Artifacts (truthcoin)'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.TRUTHCOIN_APP_FILENAME }}
           if-no-files-found: error
           path: |
             target/${{ matrix.name }}/release/${{ env.TRUTHCOIN_APP_FILENAME }}
             target/${{ matrix.name }}/release/${{ env.TRUTHCOIN_CLI_FILENAME }}
+            target/${{ matrix.name }}/release/${{ env.TRUTHCOIN_ARCHIVE_FILENAME }}
 
       - name: Release
-        uses: softprops/action-gh-release@v2.0.2
+        uses: softprops/action-gh-release@v3.0.1
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
             target/${{ matrix.name }}/release/${{ env.TRUTHCOIN_APP_FILENAME }}
             target/${{ matrix.name }}/release/${{ env.TRUTHCOIN_CLI_FILENAME }}
+            target/${{ matrix.name }}/release/${{ env.TRUTHCOIN_ARCHIVE_FILENAME }}
           fail_on_unmatched_files: true
 
   upload-releases-to-releases-drivechain-info:
     name: Upload releases to releases.drivechain.info
     runs-on: ubuntu-latest
-    needs: [build-release, integration-test]
-    if: startsWith(github.ref, 'refs/tags/')
+    needs: [integration-test, test-build-release]
+    if: startsWith(github.ref, 'refs/tags/') && vars.ENABLE_RELEASE_MIRROR == 'true'
     steps:
       - name: Download release assets
-        uses: robinraju/release-downloader@v1.9
+        uses: robinraju/release-downloader@v1.13
         with:
+          fileName: '*'
           tag: ${{ github.ref_name }}
 
       - name: Create zip files for releases.drivechain.info
