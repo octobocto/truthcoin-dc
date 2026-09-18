@@ -46,7 +46,7 @@ impl BlockValidator {
             state.try_get_height(rotxn)?.map_or(0, |height| height + 1);
 
         let mut coinbase_value = bitcoin::Amount::ZERO;
-        for output in &body.coinbase {
+        for output in &body.coinbase.outputs {
             coinbase_value = coinbase_value
                 .checked_add(output.get_bitcoin_value())
                 .ok_or(AmountOverflowError)?;
