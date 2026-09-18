@@ -1394,7 +1394,16 @@ mod tests {
         {
             let mut rwtxn = env.write_txn().unwrap();
             state
-                .apply_block(&archive, &mut rwtxn, &genesis, &empty_body, 0)
+                .apply_block(
+                    &archive,
+                    &mut rwtxn,
+                    &crate::authorization::BatchVerificationContext::new(
+                        &mut rand::rng(),
+                    ),
+                    &genesis,
+                    &empty_body,
+                    0,
+                )
                 .unwrap();
             state
                 .connect_two_way_peg_data(&mut rwtxn, &TwoWayPegData::default())
@@ -1439,7 +1448,16 @@ mod tests {
         {
             let mut rwtxn = env.write_txn().unwrap();
             state
-                .apply_block(&archive, &mut rwtxn, &block1, &empty_body, 0)
+                .apply_block(
+                    &archive,
+                    &mut rwtxn,
+                    &crate::authorization::BatchVerificationContext::new(
+                        &mut rand::rng(),
+                    ),
+                    &block1,
+                    &empty_body,
+                    0,
+                )
                 .unwrap();
             state
                 .connect_two_way_peg_data(&mut rwtxn, &deposit_twpd)
