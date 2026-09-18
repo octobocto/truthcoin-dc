@@ -865,10 +865,10 @@ pub struct Tip {
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum, strum::Display))]
 pub enum Network {
-    #[default]
     Betanet,
     Forknet,
     Regtest,
+    #[default]
     Signet,
 }
 
