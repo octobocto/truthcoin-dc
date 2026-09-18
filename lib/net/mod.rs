@@ -169,12 +169,16 @@ const SIGNET_SEED_NODE_ADDRS: &[SeedAddress<&str>] = {
     &[SIGNET_MINING_SERVER, BIP300_XYZ]
 };
 
-const ALPHANET_SEED_NODE_ADDRS: &[SeedAddress<&str>] = {
-    const ALPHANET_SEED: SeedAddress<&str> = SeedAddress {
-        host: url::Host::Domain("seed.alpha.ecash.eu.com"),
+const BETANET_SEED_NODE_ADDRS: &[SeedAddress<&str>] = {
+    const DRIVECHA_IN: SeedAddress<&str> = SeedAddress {
+        host: url::Host::Domain("seed.beta.ecash.drivecha.in"),
         port: DEFAULT_PORT,
     };
-    &[ALPHANET_SEED]
+    const ECASH_NINJA: SeedAddress<&str> = SeedAddress {
+        host: url::Host::Domain("seed.beta.ecash.ninja"),
+        port: DEFAULT_PORT,
+    };
+    &[DRIVECHA_IN, ECASH_NINJA]
 };
 
 const FORKNET_SEED_NODE_ADDRS: &[SeedAddress<&str>] = {
@@ -190,10 +194,10 @@ const fn seed_node_addrs(
     network: Network,
 ) -> &'static [SeedAddress<&'static str>] {
     match network {
-        Network::Signet => SIGNET_SEED_NODE_ADDRS,
-        Network::Regtest => &[],
-        Network::Alphanet => ALPHANET_SEED_NODE_ADDRS,
+        Network::Betanet => BETANET_SEED_NODE_ADDRS,
         Network::Forknet => FORKNET_SEED_NODE_ADDRS,
+        Network::Regtest => &[],
+        Network::Signet => SIGNET_SEED_NODE_ADDRS,
     }
 }
 
