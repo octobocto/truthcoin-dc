@@ -1091,6 +1091,7 @@ pub fn disconnect(
 
 #[cfg(test)]
 mod tests {
+    use crate::types::Coinbase;
     use std::collections::BTreeMap;
 
     use bitcoin::{
@@ -1374,7 +1375,7 @@ mod tests {
         let state = State::new(&env, None).unwrap();
 
         let empty_body = Body {
-            coinbase: Vec::new(),
+            coinbase: Coinbase::default(),
             transactions: Vec::new(),
             authorizations: Vec::new(),
             actor_proofs: Vec::new(),
