@@ -366,12 +366,12 @@ mod tests {
         let cli = Cli::try_parse_from([
             "truthcoin",
             "--datadir=/tmp/truthcoin-cli-test",
-            "--network=alphanet",
+            "--network=betanet",
             "--mainchain-grpc-host=127.0.0.1",
             "--mainchain-grpc-port=54321",
         ])
         .unwrap();
-        assert_eq!(cli.network, Network::Alphanet);
+        assert_eq!(cli.network, Network::Betanet);
         assert_eq!(
             cli.mainchain_grpc_url().as_str(),
             "http://127.0.0.1:54321/"
