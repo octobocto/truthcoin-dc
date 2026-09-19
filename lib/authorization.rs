@@ -303,6 +303,11 @@ pub fn verify_authorized_transaction(
             actual: transaction.authorizations.len(),
         });
     }
+    // A frost batch rejects an empty batch, and a transaction without inputs
+    // has nothing to sign.
+    if transaction.authorizations.is_empty() {
+        return Ok(());
+    }
     let tx_msg_canonical = tx_msg_canonical(&transaction.transaction)?;
     let mut batch_verifier = ctxt.verifier();
     for Authorization {
@@ -561,6 +566,19 @@ mod tests {
             verify_authorized_transaction(&ctxt, &authorized).is_err(),
             "a forged signature must not verify"
         );
+    }
+
+    #[test]
+    fn a_transaction_without_inputs_verifies() {
+        let mut rng = rand::rng();
+        let authorized = AuthorizedTransaction {
+            transaction: Transaction::default(),
+            authorizations: Vec::new(),
+            actor_proof: None,
+        };
+        let ctxt = BatchVerificationContext::new(&mut rng);
+        verify_authorized_transaction(&ctxt, &authorized)
+            .expect("a transaction without inputs needs no signature");
     }
 
     #[test]
