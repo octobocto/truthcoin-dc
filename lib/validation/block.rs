@@ -1,8 +1,9 @@
+use crate::authorization::{self, BatchVerificationContext};
 use crate::state::{Error, PrevalidatedBlock};
 use crate::types::{
-    AmountOverflowError, Authorization, AuthorizedTransaction, Body,
-    FilledTransaction, GetAddress as _, GetBitcoinValue as _, Header,
-    OutPointKey, OutputContent, TransactionData, Verify as _,
+    AmountOverflowError, AuthorizedTransaction, Body, FilledTransaction,
+    GetAddress as _, GetBitcoinValue as _, Header, OutPointKey, OutputContent,
+    TransactionData,
 };
 use rayon::prelude::*;
 use sneed::RoTxn;
@@ -19,10 +20,17 @@ impl BlockValidator {
         state: &crate::state::State,
         archive: &crate::archive::Archive,
         rotxn: &RoTxn,
+        batch_verification_ctxt: &BatchVerificationContext,
         header: &Header,
         body: &Body,
     ) -> Result<PrevalidatedBlock, Error> {
         use crate::state::error;
+
+        let body_size =
+            borsh::object_length(&body).map_err(Error::BorshSerialize)?;
+        if body_size > Body::MAX_SIZE {
+            return Err(Error::BodyTooLarge);
+        }
 
         let tip_hash = state.try_get_tip(rotxn)?;
         if header.prev_side_hash != tip_hash {
@@ -106,7 +114,7 @@ impl BlockValidator {
                 return Err(Error::WrongPubKeyForAddress);
             }
         }
-        if Authorization::verify_body(body).is_err() {
+        if authorization::verify_body(batch_verification_ctxt, body).is_err() {
             return Err(Error::AuthorizationError);
         }
 
@@ -234,6 +242,7 @@ impl BlockValidator {
         state: &crate::state::State,
         archive: &crate::archive::Archive,
         rotxn: &RoTxn,
+        batch_verification_ctxt: &BatchVerificationContext,
         transaction: &AuthorizedTransaction,
     ) -> Result<bitcoin::Amount, Error> {
         let mut filled_transaction =
@@ -256,7 +265,12 @@ impl BlockValidator {
                 return Err(Error::WrongPubKeyForAddress);
             }
         }
-        if Authorization::verify_transaction(transaction).is_err() {
+        if authorization::verify_transaction(
+            batch_verification_ctxt,
+            transaction,
+        )
+        .is_err()
+        {
             return Err(Error::AuthorizationError);
         }
         let fee = Self::validate_filled_transaction(
@@ -409,31 +423,91 @@ mod tests {
     }
 
     #[test]
-    fn cannot_spend_withdrawal_output() -> anyhow::Result<()> {
-        use crate::{
-            archive::Archive,
-            state::{Error, State},
-            types::{
-                Address, BitcoinOutputContent, FilledOutput,
-                FilledOutputContent, FilledTransaction, Hash, OutPoint, Output,
-                OutputContent, Transaction, Txid, WithdrawalOutputContent,
-            },
-        };
+    fn oversized_body_rejected() {
+        use bitcoin::hashes::Hash as _;
+        use sneed::Env;
 
-        let dir = tempfile::tempdir()?;
+        use crate::{archive::Archive, state::State};
+
+        let dir = tempfile::tempdir().unwrap();
         let env_path = dir.path().join("data.mdb");
-        std::fs::create_dir_all(&env_path)?;
+        std::fs::create_dir_all(&env_path).unwrap();
         let mut opts = heed::EnvOpenOptions::new();
         opts.map_size(64 * 1024 * 1024)
             .max_dbs(State::NUM_DBS + Archive::NUM_DBS);
-        let env = unsafe { sneed::Env::open(&opts, &env_path) }?;
-        let state = State::new(&env, None)?;
-        let archive = Archive::new(&env)?;
+        let env = unsafe { Env::open(&opts, &env_path) }.unwrap();
+        let state = State::new(&env, None).unwrap();
+        let archive = Archive::new(&env).unwrap();
+        let rotxn = env.read_txn().unwrap();
 
-        let main_address = "1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2"
-            .parse::<bitcoin::Address<
-            bitcoin::address::NetworkUnchecked,
-        >>()?;
+        let body = Body {
+            coinbase: crate::types::Coinbase {
+                memo: Vec::new(),
+                outputs: vec![Output {
+                    address: Address::ALL_ZEROS,
+                    content: OutputContent::Bitcoin(BitcoinOutputContent(
+                        bitcoin::Amount::ZERO,
+                    )),
+                    memo: vec![0u8; Body::MAX_SIZE + 1],
+                }],
+            },
+            transactions: Vec::new(),
+            authorizations: Vec::new(),
+            actor_proofs: Vec::new(),
+        };
+        let header = Header {
+            merkle_root: Body::compute_merkle_root(
+                &body.coinbase,
+                &body.transactions,
+            ),
+            prev_side_hash: None,
+            prev_main_hash: bitcoin::BlockHash::from_byte_array([0; 32]),
+        };
+        let batch_verification_ctxt =
+            BatchVerificationContext::new(&mut rand::rng());
+        assert!(matches!(
+            BlockValidator::prevalidate(
+                &state,
+                &archive,
+                &rotxn,
+                &batch_verification_ctxt,
+                &header,
+                &body,
+            ),
+            Err(Error::BodyTooLarge)
+        ));
+    }
+
+    #[test]
+    fn cannot_spend_withdrawal_output() {
+        use bitcoin::hashes::Hash as _;
+        use sneed::Env;
+
+        use crate::{
+            archive::Archive,
+            state::State,
+            types::{
+                FilledOutput, FilledOutputContent, OutPoint, Transaction, Txid,
+                WithdrawalOutputContent, hashes::Hash,
+            },
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let env_path = dir.path().join("data.mdb");
+        std::fs::create_dir_all(&env_path).unwrap();
+        let mut opts = heed::EnvOpenOptions::new();
+        opts.map_size(64 * 1024 * 1024)
+            .max_dbs(State::NUM_DBS + Archive::NUM_DBS);
+        let env = unsafe { Env::open(&opts, &env_path) }.unwrap();
+        let state = State::new(&env, None).unwrap();
+        let archive = Archive::new(&env).unwrap();
+        let rotxn = env.read_txn().unwrap();
+
+        let main_address = {
+            let pkh = bitcoin::PubkeyHash::hash(b"test pubkey");
+            bitcoin::Address::p2pkh(pkh, bitcoin::NetworkKind::Test)
+                .into_unchecked()
+        };
         let withdrawal = FilledOutput {
             address: Address::ALL_ZEROS,
             content: FilledOutputContent::BitcoinWithdrawal(
@@ -443,34 +517,25 @@ mod tests {
                     main_address,
                 },
             ),
-            memo: Vec::new(),
+            memo: vec![],
         };
         let outpoint = OutPoint::Regular {
-            txid: Txid(Hash::from([1; 32])),
+            txid: Txid(Hash::from([1u8; 32])),
             vout: 0,
         };
         let tx = FilledTransaction {
             transaction: Transaction {
                 inputs: vec![outpoint],
-                outputs: vec![Output {
-                    address: Address::ALL_ZEROS,
-                    content: OutputContent::Bitcoin(BitcoinOutputContent(
-                        bitcoin::Amount::from_sat(1300),
-                    )),
-                    memo: Vec::new(),
-                }],
-                ..Default::default()
+                ..Transaction::default()
             },
             spent_utxos: vec![withdrawal],
             actor_address: None,
         };
-        let rotxn = env.read_txn()?;
         assert!(matches!(
             BlockValidator::validate_filled_transaction(
-                &state, &archive, &rotxn, &tx, None
+                &state, &archive, &rotxn, &tx, None,
             ),
             Err(Error::SpendWithdrawalOutput { .. })
         ));
-        Ok(())
     }
 }

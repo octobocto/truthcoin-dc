@@ -142,6 +142,9 @@ fn ipv4_node_connects_with_both_seed_families() {
             &tokio::runtime::Handle::current(),
             &env,
             archive,
+            crate::authorization::BatchVerificationContext::new(
+                &mut rand::rng(),
+            ),
             None,
             Network::Regtest,
             state,
@@ -181,6 +184,7 @@ async fn rejected_duplicate_has_no_peer_close_event() -> anyhow::Result<()> {
         &tokio::runtime::Handle::current(),
         &env,
         archive,
+        crate::authorization::BatchVerificationContext::new(&mut rand::rng()),
         None,
         Network::Regtest,
         state,
@@ -195,6 +199,7 @@ async fn rejected_duplicate_has_no_peer_close_event() -> anyhow::Result<()> {
     let context = super::PeerConnectionCtxt {
         env,
         archive: net.archive.clone(),
+        batch_verification_ctxt: net.batch_verification_ctxt,
         magic_bytes: net.magic_bytes,
         resolved_address: addr.into(),
         state: net.state.clone(),
@@ -251,6 +256,7 @@ fn temp_net_with_peers(
         &tokio::runtime::Handle::current(),
         &env,
         archive,
+        crate::authorization::BatchVerificationContext::new(&mut rand::rng()),
         None,
         Network::Regtest,
         state,

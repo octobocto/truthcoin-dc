@@ -110,13 +110,7 @@ jobs:
       - name: Build the matched enforcer
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target
-          ENFORCER_SOURCE: ${{ runner.temp }}/bip300301-enforcer
-        run: |
-          ENFORCER_REV=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["workspace"]["dependencies"]["bip300301_enforcer_integration_tests"]["rev"])')
-          git init "$ENFORCER_SOURCE"
-          git -C "$ENFORCER_SOURCE" fetch --depth 1 https://github.com/LayerTwo-Labs/bip300301_enforcer "$ENFORCER_REV"
-          git -C "$ENFORCER_SOURCE" checkout --detach FETCH_HEAD
-          cargo build --locked --manifest-path "$ENFORCER_SOURCE/Cargo.toml" --bin bip300301_enforcer
+        run: cargo build --locked --manifest-path bip300301_enforcer/Cargo.toml --bin bip300301_enforcer
       - name: Build (debug)
         run: cargo build
       - name: Run integration tests

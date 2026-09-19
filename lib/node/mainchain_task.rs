@@ -114,7 +114,7 @@ enum Error {
     #[error("Failed to fetch ancestor info for tip ({tip})")]
     RequestAncestorInfos {
         tip: bitcoin::BlockHash,
-        source: ResponseError,
+        source: Box<ResponseError>,
     },
     #[error("Send event error")]
     SendEvent(#[source] mpsc::SendError),
@@ -601,7 +601,7 @@ where
         self.sync_progress.set_idle();
         if !ancestor_infos.map_err(|err| Error::RequestAncestorInfos {
             tip: best_main_tip,
-            source: err,
+            source: Box::new(err),
         })? {
             return Err(Error::AncestorInfoUnavailable { tip: best_main_tip });
         }

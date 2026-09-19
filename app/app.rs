@@ -17,7 +17,10 @@ use truthcoin_dc::{
         FilledOutput, InPoint, OutPoint, Output, Transaction,
         proto::mainchain::{
             self,
-            generated::{validator_service_server, wallet_service_server},
+            generated::{
+                block_producer_service_server, mining_service_server,
+                validator_service_server, wallet_service_server,
+            },
         },
     },
     wallet::{self, Wallet},
@@ -49,6 +52,12 @@ impl From<node::Error> for Error {
     fn from(err: node::Error) -> Self {
         Self::Node(Box::new(err))
     }
+}
+
+struct ProtoSupport {
+    block_producer: bool,
+    miner: bool,
+    wallet: bool,
 }
 
 fn update_wallet(node: &Node, wallet: &Wallet) -> Result<(), Error> {
@@ -204,8 +213,11 @@ impl App {
 
     async fn check_proto_support(
         transport: tonic::transport::channel::Channel,
-    ) -> Result<bool, tonic::Status> {
+    ) -> Result<ProtoSupport, tonic::Status> {
         let mut health_client = HealthClient::new(transport);
+        let block_producer_service_name =
+            block_producer_service_server::SERVICE_NAME;
+        let mining_service_name = mining_service_server::SERVICE_NAME;
         let validator_service_name = validator_service_server::SERVICE_NAME;
         let wallet_service_name = wallet_service_server::SERVICE_NAME;
         if !Self::check_status_serving(
@@ -219,15 +231,31 @@ impl App {
             )));
         }
         tracing::info!("Verified existence of {}", validator_service_name);
+        let has_block_producer_service = Self::check_status_serving(
+            &mut health_client,
+            block_producer_service_name,
+        )
+        .await?;
+        let has_mining_service =
+            Self::check_status_serving(&mut health_client, mining_service_name)
+                .await?;
         let has_wallet_service =
             Self::check_status_serving(&mut health_client, wallet_service_name)
                 .await?;
         tracing::info!(
-            "Checked existence of {}: {}",
+            %has_block_producer_service,
+            %has_mining_service,
+            %has_wallet_service,
+            "Checked existence of {}, {}, {}",
+            block_producer_service_name,
+            mining_service_name,
             wallet_service_name,
-            has_wallet_service
         );
-        Ok(has_wallet_service)
+        Ok(ProtoSupport {
+            block_producer: has_block_producer_service,
+            miner: has_mining_service,
+            wallet: has_wallet_service,
+        })
     }
 
     /// Ask the mainchain node for its services until it answers. The node may
@@ -235,12 +263,12 @@ impl App {
     async fn wait_for_proto_support(
         transport: tonic::transport::channel::Channel,
         url: &url::Url,
-    ) -> bool {
+    ) -> ProtoSupport {
         const RETRY_DELAY: Duration = Duration::from_secs(5);
 
         loop {
             match Self::check_proto_support(transport.clone()).await {
-                Ok(has_wallet_service) => return has_wallet_service,
+                Ok(proto_support) => return proto_support,
                 Err(status) => {
                     tracing::warn!(
                         %url, %status, "Waiting for CUSF mainchain service(s)"
@@ -271,21 +299,25 @@ impl App {
         .unwrap()
         .concurrency_limit(256)
         .connect_lazy();
-        let (cusf_mainchain, cusf_mainchain_wallet) =
-            if runtime.block_on(Self::wait_for_proto_support(
-                transport.clone(),
-                &config.mainchain_grpc_url,
-            )) {
-                (
-                    mainchain::ValidatorClient::new(transport.clone()),
-                    Some(mainchain::WalletClient::new(transport)),
-                )
-            } else {
-                (mainchain::ValidatorClient::new(transport), None)
-            };
+        let ProtoSupport {
+            block_producer: has_block_producer,
+            miner: has_miner,
+            wallet: has_wallet,
+        } = runtime.block_on(Self::wait_for_proto_support(
+            transport.clone(),
+            &config.mainchain_grpc_url,
+        ));
+        let cusf_mainchain_block_producer = has_block_producer
+            .then(|| mainchain::BlockProducerClient::new(transport.clone()));
+        let cusf_mainchain_miner =
+            has_miner.then(|| mainchain::MiningClient::new(transport.clone()));
+        let cusf_mainchain_wallet =
+            has_wallet.then(|| mainchain::WalletClient::new(transport.clone()));
+        let cusf_mainchain = mainchain::ValidatorClient::new(transport);
         let miner = cusf_mainchain_wallet
-            .clone()
-            .map(|wallet| Miner::new(cusf_mainchain.clone(), wallet))
+            .map(|wallet| {
+                Miner::new(cusf_mainchain.clone(), cusf_mainchain_miner, wallet)
+            })
             .transpose()?;
         let local_pool = LocalPoolHandle::new(1);
         let node = runtime.block_on(Node::new(
@@ -296,7 +328,8 @@ impl App {
             config.add_peers.clone(),
             config.server_names.clone(),
             cusf_mainchain,
-            cusf_mainchain_wallet,
+            cusf_mainchain_block_producer,
+            &mut rand::rng(),
             &runtime,
             config.decision_config_testing,
             #[cfg(feature = "zmq")]
@@ -356,7 +389,7 @@ impl App {
     }
 
     pub fn sign_and_send(&self, tx: Transaction) -> Result<(), Error> {
-        let authorized_transaction = self.wallet.authorize(tx)?;
+        let authorized_transaction = self.wallet.authorize(rand::rng(), tx)?;
         self.submit_transaction(&authorized_transaction)
     }
 
@@ -678,7 +711,7 @@ mod test {
     use tonic_health::ServingStatus;
     use truthcoin_dc::types::proto::mainchain::generated::validator_service_server;
 
-    use super::App;
+    use super::{App, ProtoSupport};
 
     fn transport(addr: SocketAddr) -> tonic::transport::channel::Channel {
         tonic::transport::channel::Channel::from_shared(format!(
@@ -720,9 +753,12 @@ mod test {
                 .is_err()
         );
         let () = serve_validator_service(addr).await;
-        let has_wallet_service =
-            timeout(Duration::from_secs(30), proto_support).await?;
-        assert!(!has_wallet_service);
+        let ProtoSupport {
+            block_producer,
+            miner,
+            wallet,
+        } = timeout(Duration::from_secs(30), proto_support).await?;
+        assert!(!block_producer && !miner && !wallet);
         Ok(())
     }
 }

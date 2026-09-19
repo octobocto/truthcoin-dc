@@ -24,8 +24,6 @@ fn collect_withdrawal_bundle(
     txn: &RoTxn,
     block_height: u32,
 ) -> Result<Option<WithdrawalBundle>, Error> {
-    // Aggregate all outputs by destination.
-    // destination -> (value, mainchain fee, spent_utxos)
     let mut address_to_aggregated_withdrawal = HashMap::<
         bitcoin::Address<bitcoin::address::NetworkUnchecked>,
         AggregatedWithdrawal,
@@ -948,8 +946,6 @@ fn disconnect_event(
             if !state.delete_utxo(rwtxn, &outpoint)? {
                 return Err(Error::NoUtxo { outpoint });
             }
-            // Blocks are iterated in reverse here, so the first event block
-            // hash seen is the latest. Keep it to match what `connect` stored.
             if latest_deposit_block_hash.is_none() {
                 *latest_deposit_block_hash = Some(event_block_hash);
             }
@@ -961,8 +957,6 @@ fn disconnect_event(
                 block_height,
                 withdrawal_bundle_event,
             )?;
-            // Blocks are iterated in reverse here, so the first event block
-            // hash seen is the latest. Keep it to match what `connect` stored.
             if latest_withdrawal_bundle_event_block_hash.is_none() {
                 *latest_withdrawal_bundle_event_block_hash =
                     Some(event_block_hash);
@@ -1021,7 +1015,8 @@ pub fn disconnect(
         if block_height != last_withdrawal_bundle_event_block_height {
             return Err(Error::DatabaseError(format!(
                 "withdrawal bundle event block height mismatch: \
-                 {block_height} != {last_withdrawal_bundle_event_block_height}"
+                 {block_height} != \
+                 {last_withdrawal_bundle_event_block_height}"
             )));
         }
         if !state
@@ -1400,7 +1395,16 @@ mod tests {
         {
             let mut rwtxn = env.write_txn().unwrap();
             state
-                .apply_block(&archive, &mut rwtxn, &genesis, &empty_body, 0)
+                .apply_block(
+                    &archive,
+                    &mut rwtxn,
+                    &crate::authorization::BatchVerificationContext::new(
+                        &mut rand::rng(),
+                    ),
+                    &genesis,
+                    &empty_body,
+                    0,
+                )
                 .unwrap();
             state
                 .connect_two_way_peg_data(&mut rwtxn, &TwoWayPegData::default())
@@ -1445,7 +1449,16 @@ mod tests {
         {
             let mut rwtxn = env.write_txn().unwrap();
             state
-                .apply_block(&archive, &mut rwtxn, &block1, &empty_body, 0)
+                .apply_block(
+                    &archive,
+                    &mut rwtxn,
+                    &crate::authorization::BatchVerificationContext::new(
+                        &mut rand::rng(),
+                    ),
+                    &block1,
+                    &empty_body,
+                    0,
+                )
                 .unwrap();
             state
                 .connect_two_way_peg_data(&mut rwtxn, &deposit_twpd)
